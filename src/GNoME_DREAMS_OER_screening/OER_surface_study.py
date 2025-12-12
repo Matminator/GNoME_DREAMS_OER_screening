@@ -8,8 +8,8 @@ from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab
 
-from OER_study_utils import get_atoms_and_normal_from_input
-from OER_adsorption_site_study import OER_adsorption_site_study
+from GNoME_DREAMS_OER_screening.OER_study_utils import get_atoms_and_normal_from_input
+from GNoME_DREAMS_OER_screening.OER_adsorption_site_study import OER_adsorption_site_study
 
 class OER_surface_study:
 

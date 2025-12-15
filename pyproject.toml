@@ -13,7 +13,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "pymatgen", "ase", "pandas", "numpy", "seaborn"
+    "pymatgen", "ase", "pandas", "numpy", "seaborn", "custodian"
 ]
 
 [tool.setuptools.packages.find]

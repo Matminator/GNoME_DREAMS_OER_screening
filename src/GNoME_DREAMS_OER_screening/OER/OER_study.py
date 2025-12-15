@@ -13,8 +13,8 @@ from pymatgen.core.surface import (
     Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-from GNoME_DREAMS_OER_screening.OER_study_utils import get_atoms_and_normal_from_input
-from GNoME_DREAMS_OER_screening.OER_surface_study import OER_surface_study
+from GNoME_DREAMS_OER_screening.OER.OER_study_utils import get_atoms_and_normal_from_input
+from GNoME_DREAMS_OER_screening.OER.OER_surface_study import OER_surface_study
 
 
 class OER_catalyst_study:

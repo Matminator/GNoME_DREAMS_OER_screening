@@ -6,7 +6,6 @@ from GNoME_DREAMS_OER_screening.vasp.pre_defined_vasp_sets import (
 )
 
 
-
 def test_RPBE_relax_bulk_set():
 
     atoms = Atoms('Cu', positions=[[0, 0, 0]], cell=[3.6, 3.6, 3.6], pbc=True)

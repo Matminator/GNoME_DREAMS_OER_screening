@@ -4,6 +4,23 @@ from ase import Atoms
 
     
 class OER_adsorption_site_study:
+    """
+    Class for managing placement of OER intermediates on a given 
+    adsorption site of a clean surface, and storage of the energies.
+    Is intended to be initialized through the OER_surface_study class,
+    via the 'initialize_adsorption_site_study' method.
+
+    Args:
+        clean_surface: Atoms
+            The clean surface on which the adsorbate is to be placed.
+        init_add_position: np.ndarray
+            The initial position (3D coordinates) for placing the O 
+            adsorbate.
+        site_index: int
+            The index of the adsorption site on the surface (determined 
+            by the OER_surface_study class).
+    """
+
     
     def __init__(self, clean_surface: Atoms, 
                  init_add_position: np.ndarray, site_index: int

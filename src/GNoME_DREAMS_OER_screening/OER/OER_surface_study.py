@@ -12,12 +12,53 @@ from GNoME_DREAMS_OER_screening.OER.OER_study_utils import get_atoms_and_normal_
 from GNoME_DREAMS_OER_screening.OER.OER_adsorption_site_study import OER_adsorption_site_study
 
 class OER_surface_study:
+    """
+    Class for determening surface adsorption sites. This class is 
+    intented to be initialized through an OER_catalyst_study object, via
+    the method 'initialize_OER_surface_studies' method. This class 
+    handles the determination and storage of surface adsorption sites.
+    For later computation of adsorption energies for OER intermediates 
+    it is highly recommended to set a relaxed surface structure first 
+    and use adsorption sites determined on the relaxed surface. This
+    must be done through the 'set_relaxed_base_surface' method (the 
+    'get_non_relaxed_surface' method may be used to obtain the
+    non-relaxed surface structure for this purpose).
+    To compute adsorption energies of OER intermediates for a given 
+    site, the 'initialize_adsorption_site_study' method should be
+    called. This initializes an OER_adsorption_site_study object for the
+    given site index. The OER_adsorption_site_study object then handles
+    the placement of the adsorbate and storage of the adsorbate
+    energies. After having stored the relvant energies in the
+    OER_adsorption_site_study object, the 'update_adsorption_energies'
+    method may be called to compute adsorption energies. These may then 
+    be retrieved through the 'get_adsorption_sites_df' method, yielding 
+    a pandas DataFrame with the adsorption sites and adsorbate energies.
+
+    Args:
+        OER_catalyst_study: OER_catalyst_study
+            The OER_catalyst_study object to which this surface study
+            belongs.
+        input_surface: Atoms | Slab
+            The surface structure to be studied, either as an ASE Atoms
+            object or a Pymatgen Slab object.
+        normal_vector: np.ndarray | None
+            The normal vector of the surface. If None, the normal vector
+            will be inferred from the input_surface object (if
+            possible).
+        fixed_bottom_half: bool
+            Whether to fix the bottom half of the surface. Default is 
+            True.
+        vacuum: float
+            The amount of vacuum (in Ångstrom) to add to the surface.
+            Default is 8 Ångstrom.
+    """
+    
 
     def __init__(self, 
                  OER_catalyst_study,
                  input_surface: Atoms | Slab,
                  normal_vector: np.ndarray | None = None,
-                 fixed_bottom_half: bool = True, vacuum = 8
+                 fixed_bottom_half: bool = True, vacuum: float = 8
                  ):
     
         # Make sure that the surfaces is on the form of an ASE Atoms 

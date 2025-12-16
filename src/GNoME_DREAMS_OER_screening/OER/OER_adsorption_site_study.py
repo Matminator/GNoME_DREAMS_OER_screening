@@ -21,7 +21,7 @@ class OER_adsorption_site_study:
             by the OER_surface_study class).
     """
 
-    
+
     def __init__(self, clean_surface: Atoms, 
                  init_add_position: np.ndarray, site_index: int
                  ):

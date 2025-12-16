@@ -9,6 +9,7 @@ class OER_adsorption_site_study:
                  init_add_position: np.ndarray, site_index: int
                  ):
         
+        clean_surface = clean_surface.copy()
         for atom in clean_surface:
             atom.tag = 0  # Resetting tags to zero
         

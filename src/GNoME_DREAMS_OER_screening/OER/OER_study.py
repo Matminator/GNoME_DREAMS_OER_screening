@@ -29,7 +29,6 @@ class OER_catalyst_study:
     free energies of H2O, H2, O2 are stored in this class, in addition 
     to initial corrections (correction = ZPE + Cp - TS) to be applied to
     adsorption energies.
-    
 
     Args:
         bulk (Atoms): Bulk structure of the catalyst material.
@@ -45,7 +44,6 @@ class OER_catalyst_study:
         made to the DFT OOH* adsorption energy.
         bulk_energy (float, optional): Energy of the bulk structure.
     """
-
 
 
     def __init__(self, bulk = Atoms,    
@@ -76,7 +74,6 @@ class OER_catalyst_study:
             'OH_ad_correction': default_OH_ad_correction,
             'OOH_ad_correction': default_OOH_ad_correction,
         }
-
 
         self.max_miller = None
         self.distinct_millers = None
@@ -112,6 +109,9 @@ class OER_catalyst_study:
 
     def get_gas_and_energy_corrections(self) -> dict[str, float]:
         return self.species_energies.copy()
+
+    def get_bulk_structure(self) -> Atoms:
+        return self.bulk_atoms.copy()
 
     def _determine_coordination_numbers(self, atoms: Atoms,
                 method: Literal['coordination', 'non-O-coordination']

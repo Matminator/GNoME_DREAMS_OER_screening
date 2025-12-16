@@ -18,27 +18,21 @@ from GNoME_DREAMS_OER_screening.OER.OER_surface_study import OER_surface_study
 
 
 class OER_catalyst_study:
+    """
+    The core class for managing for ranking and generating surfaces from
+    a bulk structure, for the purpose of OER catalyst screening. All 
+    data related to computation of adsorption energies is stored in this
+    class. Surfaces are initialized as OER_surface_study instances, via 
+    the method 'initialize_OER_surface_studies', and stored in a 
+    dictionary, with miller indices as keys. Surface structures with 
+    adsorbates are managed in the OER_surface_study instances. Gas phase
+    free energies of H2O, H2, O2 are stored in this class, in addition 
+    to initial corrections (correction = ZPE + Cp - TS) to be applied to
+    adsorption energies.
+    
 
-    def __init__(self, bulk = Atoms,    
-                 H2O_gas_free_energy = float,
-                 H2_gas_free_energy = float,
-                 O2_gas_free_energy: float = None,
-                 default_O_ad_correction: float = 0.070,
-                 default_OH_ad_correction: float = 0.361,
-                 default_OOH_ad_correction: float = 0.431,
-                 bulk_energy: float = None,
-                 ):
-        """
-        Central class to manage OER catalyst study. Takes in bulk 
-        structure and gas phase energies, and manages surface
-        generation and ranking. Surfaces are initialized via this class,
-        as OER_surface_study instances, and stored in a dictionary. Gas
-        phase energies and default adsorption energy corrections are 
-        needed to compute adsorption energies.
-
-        Parameters:
-        bulk (Atoms): ASE Atoms object representing the bulk structure
-            of the catalyst material.
+    Args:
+        bulk (Atoms): Bulk structure of the catalyst material.
         H2O_gas_free_energy (float): Free energy of H2O in gas phase.
         H2_gas_free_energy (float): Free energy of H2 in gas phase.
         O2_gas_free_energy (float, optional): Free energy of O2 in gas
@@ -50,7 +44,19 @@ class OER_catalyst_study:
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
         bulk_energy (float, optional): Energy of the bulk structure.
-        """
+    """
+
+
+
+    def __init__(self, bulk = Atoms,    
+                 H2O_gas_free_energy = float,
+                 H2_gas_free_energy = float,
+                 O2_gas_free_energy: float = None,
+                 default_O_ad_correction: float = 0.070,
+                 default_OH_ad_correction: float = 0.361,
+                 default_OOH_ad_correction: float = 0.431,
+                 bulk_energy: float = None,
+                 ):
         
         self.bulk_structure = AseAtomsAdaptor.get_structure(bulk)
         self.bulk_atoms = bulk

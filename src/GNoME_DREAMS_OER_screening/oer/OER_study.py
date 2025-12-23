@@ -1,3 +1,6 @@
+import sys
+sys.path.append("/nfs/turbo/coe-venkvis/ziqiw-turbo/material_agent/GNoME_DREAMS_OER_screening/src/GNoME_DREAMS_OER_screening")
+
 import numpy as np
 import pandas as pd
 
@@ -13,8 +16,8 @@ from pymatgen.core.surface import (
     Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-from GNoME_DREAMS_OER_screening.OER.OER_study_utils import get_atoms_and_normal_from_input
-from GNoME_DREAMS_OER_screening.OER.OER_surface_study import OER_surface_study
+from oer.OER_study_utils import get_atoms_and_normal_from_input
+from oer.OER_surface_study import OER_surface_study
 
 
 class OER_catalyst_study:

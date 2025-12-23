@@ -8,8 +8,8 @@ from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab
 
-from GNoME_DREAMS_OER_screening.OER.OER_study_utils import get_atoms_and_normal_from_input
-from GNoME_DREAMS_OER_screening.OER.OER_adsorption_site_study import OER_adsorption_site_study
+from oer.OER_study_utils import get_atoms_and_normal_from_input
+from oer.OER_adsorption_site_study import OER_adsorption_site_study
 
 class OER_surface_study:
     """
@@ -170,7 +170,7 @@ class OER_surface_study:
             
         return df        
 
-    def view_base_surface(self, relaxed_surface: bool = True,
+    def get_base_surface(self, relaxed_surface: bool = True,
                      include_adsorption_sites: bool = False,
                      use_adsorbate: str = "X"):
         if relaxed_surface and self.base_surface_relaxed is None:
@@ -201,7 +201,17 @@ class OER_surface_study:
                 ad_atom = Atoms(use_adsorbate, positions=[position])
                 surface += ad_atom
 
-        view(surface)
+        return surface
+
+    def view_base_surface(self, relaxed_surface: bool = True,
+                     include_adsorption_sites: bool = False,
+                     use_adsorbate: str = "X"):
+        surface = self.get_base_surface(
+            relaxed_surface, include_adsorption_sites, use_adsorbate
+        )
+        view(surface, viewer='x3d')
+        
+    
 
     def initialize_adsorption_site_study(self, index: int,
                                          relaxed_surface: bool = True

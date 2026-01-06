@@ -23,7 +23,6 @@ from custodian.vasp.handlers import (
     WalltimeHandler
 )
 
-
 def run_vasp_via_custodian(
                 directory, 
                 handlers = [VaspErrorHandler()],
@@ -79,7 +78,7 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     structures from the VASP calculation.
     """
 
-    atoms_list = read(directory + "/vasprun.xml", index=":")
+    atoms_list = read(directory / "vasprun.xml", index=":")
 
     if return_only_final:
         out = [atoms_list[-1]]
@@ -117,3 +116,34 @@ def clean_up_vasp_directory(
                 file.unlink()
         except Exception as e:
             print(f"Could not remove {file}: {e}")
+
+def exlib_run_vasp(
+    directory, 
+    handlers = [VaspErrorHandler()],
+    vasp_cmd = ["mpiexec", "vasp_std"],
+    auto_npar = True,
+    max_errors = 20
+    ):
+    
+    try:
+        run_vasp_via_custodian(
+            directory=directory,
+            handlers=handlers,
+            vasp_cmd=vasp_cmd,
+            auto_npar=auto_npar,
+            max_errors=max_errors
+        )
+
+        atoms_result = read_vasp_results(
+            directory=directory,
+            return_only_final=True
+        )[0]
+        E = atoms_result.get_total_energy()
+        out = {"atoms_result": atoms_result, "E": E, "error": None}
+
+        clean_up_vasp_directory(directory=directory)
+
+    except Exception as e:
+        out = {"atoms_result": None, "E": None, "error": str(e)}
+
+    return out

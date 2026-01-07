@@ -119,7 +119,7 @@ def clean_up_vasp_directory(
 
 def exlib_run_vasp(
     directory, 
-    retrun_vasp_out = True,
+    return_vasp_out = True,
     handlers = [VaspErrorHandler()],
     vasp_cmd = ["mpiexec", "vasp_std"],
     auto_npar = True,
@@ -130,8 +130,8 @@ def exlib_run_vasp(
     results.
 
     Parameters:
-    directory: directory where VASP calculation will be run.
-    retrun_vasp_out (bool): Whether to return the content of vasp.out
+    directory (PathLike): directory where VASP calculation will be run.
+    return_vasp_out (bool): Whether to return the content of vasp.out
     file.
     handlers (list): A list of Custodian error handlers to use.
     vasp_cmd (list): The command to run VASP.
@@ -162,8 +162,8 @@ def exlib_run_vasp(
     except Exception as e:
         out = {"atoms_result": None, "E": None, "error": str(e)}
 
-    if retrun_vasp_out:
-        with open("vasp.out", "r") as f:
+    if return_vasp_out:
+        with open(directory / "vasp.out", "r") as f:
             vasp_text = f.read()
         out["vasp_out"] = vasp_text
     else:

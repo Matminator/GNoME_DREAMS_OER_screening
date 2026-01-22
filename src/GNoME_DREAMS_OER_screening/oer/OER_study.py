@@ -16,8 +16,8 @@ from pymatgen.core.surface import (
     Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-from oer.OER_study_utils import get_atoms_and_normal_from_input
-from oer.OER_surface_study import OER_surface_study
+from gnome_dreams_oer_screening.oer.oer_study_utils import get_atoms_and_normal_from_input
+from gnome_dreams_oer_screening.oer.oer_surface_study import OER_surface_study
 
 
 class OER_catalyst_study:
@@ -117,13 +117,13 @@ class OER_catalyst_study:
         return self.bulk_atoms.copy()
 
     def _determine_coordination_numbers(self, atoms: Atoms,
-                method: Literal['coordination', 'non-O-coordination']
+                method: Literal['coordination'] 
                 = 'coordination') -> list[int]:
         
         # Build neighbor list
         cutoffs = natural_cutoffs(atoms)
         nl = NeighborList(cutoffs, self_interaction=False, 
-                          bothways=True)
+                          bothways=True, skin = 0)
         nl.update(atoms)
         coord_nums = []
         for i, atom in enumerate(atoms):
@@ -135,6 +135,23 @@ class OER_catalyst_study:
                 
         return coord_nums
     
+    def _set_bulk_coordination(self, method: str) -> None:
+        """
+        Compute and store coordination numbers for bulk atoms, applying
+        the specified method. The method SHOULD be the same as that used
+        for surface slabs, to ensure consistency!
+        
+        Args:
+            method (str): Method to compute coordination numbers.
+        """
+        # Compute coordination numbers for bulk atoms, using the method
+        coord_numbers = self._determine_coordination_numbers(
+            self.bulk_atoms, method)
+        # Store coordination numbers as a site property in the bulk 
+        # structure:
+        self.bulk_structure.add_site_property("bulk-custom-coord", 
+                                              coord_numbers)
+
     def _compare_to_bulk_stoichiometry(self, atoms: Atoms,
                 compare_O_only_stoichiometry: bool = False) -> bool:
         
@@ -165,18 +182,29 @@ class OER_catalyst_study:
         self.distinct_millers = distinct_millers
         self.df_millers_ranking = df
 
-    def add_scores_to_df(self):
+    def add_scores_to_df(self, all_scores):
         df = self.df_millers_ranking
+        df['Scores'] = None
+        df['Scores'] = df['Scores'].astype(object)
         # Adding raw scores to df:
-        for miller, score in self.scores.items():
-            df.loc[
-                df['miller_indices'] == miller,
-                'Score'
-            ] = score
-        df['Score'] = pd.to_numeric(df['Score'], errors='coerce')
+        max_scores = []
+
+        for miller, scores in all_scores.items():
+            # Find the matching index
+            idx_list = df.index[df['miller_indices'] == miller].tolist()
+            if not idx_list:
+                continue
+            idx = idx_list[0]
+
+            # Store the array in the cell
+            df.at[idx, 'Scores'] = scores           # treat scores as a single object
+            df.at[idx, 'Max Score'] = np.max(scores) # numeric is fine
+        
+        df['Max Score'] = pd.to_numeric(df['Max Score'], 
+                                        errors='coerce')
         # adding normalized scores to df:
         try:
-            scores_values = df['Score'].values
+            scores_values = df['Max Score'].values
             min_score = np.nanmin(scores_values)
             max_score = np.nanmax(scores_values)
             normalized_scores = (scores_values - min_score)
@@ -193,13 +221,16 @@ class OER_catalyst_study:
         method: Literal['coordination', 'non-O-coordination'],
         stoichiometry: Literal['stoichiometric', 'O-stoichiometric',
                                  'any'],
-        min_slab_size = 4, max_slab_size = 10
+        min_slab_size = 4, max_slab_size = 10, max_miller: int = 1
         ):
+
+        # Ensure bulk coordination numbers are set, if needed by method:
+        if 'coordination' in method:
+            self._set_bulk_coordination(method)
         
+        # If distinct millers have not been identified yet, do it now:
         if self.distinct_millers is None:
-            raise ValueError("You must first identify surfaces by" \
-                             " calling 'identify_distinct_surfaces'" \
-                             " method.")
+            self.identify_distinct_surfaces(max_miller = max_miller)
 
         slabs_for_millers = {}
         for miller_indices in self.distinct_millers:
@@ -223,30 +254,72 @@ class OER_catalyst_study:
                 
             slabs_for_millers[miller_indices] = slabs
             
-        self.slabs_for_millers = slabs_for_millers
-        slabs_as_list_of_atoms = {
-            miller: [AseAtomsAdaptor.get_atoms(slab) 
-                     for slab in slabs]
-            for miller, slabs in slabs_for_millers.items()
-        }
-        self.slabs_as_list_of_atoms = slabs_as_list_of_atoms
+        # ---------------------------------------------------------------------------
+        # --- CODE USED BY PREVIOUS IMPLEMENTATION, TO BE DELETED IN THE FUTURE <--------------------
+        # self.slabs_for_millers = slabs_for_millers # ----------------- SEEMS TO BE UNUSED? REMOVE? <-------
+        # slabs_as_list_of_atoms = {
+        #     miller: [AseAtomsAdaptor.get_atoms(slab) for slab in slabs]
+        #     for miller, slabs in slabs_for_millers.items()
+        # }
+        # self.slabs_as_list_of_atoms = slabs_as_list_of_atoms
 
-        bulk_coordination = self._determine_coordination_numbers(
-            self.bulk_atoms, method
-        )
-        mean_bulk_coordination = np.mean(bulk_coordination)
+        # bulk_coordination = self._determine_coordination_numbers(
+        #     self.bulk_atoms, method
+        # )
+        # mean_bulk_coordination = np.mean(bulk_coordination)
 
-        scores = {}
-        for miller, atoms_list in slabs_as_list_of_atoms.items():
-            score = None # Default score if no slabs pass the filters
-            if len(atoms_list) != 0:
-                # Computing the surface area of the slab cell:
-                cell = atoms_list[0].get_cell()
-                A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
+        # scores = {}
+        # for miller, atoms_list in slabs_as_list_of_atoms.items():
+        #     score = None # Default score if no slabs pass the filters
+        #     if len(atoms_list) != 0:
+        #         # Computing the surface area of the slab cell:
+        #         cell = atoms_list[0].get_cell()
+        #         A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
 
-                for atoms in atoms_list:       
+        #         for atoms in atoms_list:       
+        #             if stoichiometry == 'stoichiometric':
+        #                 if not self._compare_to_bulk_stoichiometry(
+        #                     atoms):
+        #                     continue
+        #             elif stoichiometry == 'O-stoichiometric':
+        #                 if not self._compare_to_bulk_stoichiometry(
+        #                     atoms,
+        #                     compare_O_only_stoichiometry = True
+        #                     ):
+        #                     continue
+                        
+        #             coordination_numbers = \
+        #             self._determine_coordination_numbers(atoms, method)
+                    
+        #             N_surface = len(coordination_numbers)
+        #             mean_slab_coordination = np.mean(
+        #                 coordination_numbers)
+
+        #             K = N_surface / A_surface / 2  # dividing by 2 to get per surface side
+        #             coordination_diff = K * (mean_slab_coordination 
+        #                                     - mean_bulk_coordination)
+                    
+        #             if (score is None) or (coordination_diff > score):
+        #                 score = coordination_diff
+                
+        #     scores[miller] = score
+        # ---------------------------------------------------------------------------
+
+        all_scores = {}
+        for miller, slabs in slabs_for_millers.items():
+            scores = None # Default score if no slabs pass the filters
+            if len(slabs) != 0:
+                
+                for slab in slabs:
+                    expected_coordinations = \
+                        slab.site_properties.get('bulk-custom-coord')
+
+                for slab in slabs:       
+                    atoms = AseAtomsAdaptor.get_atoms(slab)
+
                     if stoichiometry == 'stoichiometric':
-                        if not self._compare_to_bulk_stoichiometry(atoms):
+                        if not self._compare_to_bulk_stoichiometry(
+                            atoms):
                             continue
                     elif stoichiometry == 'O-stoichiometric':
                         if not self._compare_to_bulk_stoichiometry(
@@ -254,25 +327,39 @@ class OER_catalyst_study:
                             compare_O_only_stoichiometry = True
                             ):
                             continue
-                        
-                    coordination_numbers = self._determine_coordination_numbers(
-                        atoms, method
-                        )
-                    
-                    N_surface = len(coordination_numbers)
-                    mean_slab_coordination = np.mean(coordination_numbers)
+                    cell = atoms.get_cell()
+                    A_surface = np.linalg.norm(np.cross(cell[0], 
+                                                        cell[1]))
 
-                    K = N_surface / A_surface / 2  # dividing by 2 to get per surface side
-                    coordination_diff = K * (mean_slab_coordination 
-                                            - mean_bulk_coordination)
+                    crrosponding_bulk_coords = slab.site_properties.get(
+                        'bulk-custom-coord')
                     
-                    if (score is None) or (coordination_diff > score):
-                        score = coordination_diff
-                
-            scores[miller] = score
+                    # For now, only consider non-zero to allow for other
+                    # methods than 'coordination', e.g., O-coordination:
+                    N_non_zero = sum(1 for x in crrosponding_bulk_coords 
+                                     if x > 0)
 
-        self.scores = scores
-        self.add_scores_to_df()
+                    coordination_numbers = \
+                    self._determine_coordination_numbers(atoms, method)
+
+                    crrosponding_bulk_coords = np.array(
+                        crrosponding_bulk_coords)
+                    coordination_numbers = np.array(
+                        coordination_numbers)
+                    corrd_diff = np.sum(
+                        coordination_numbers - crrosponding_bulk_coords)
+                    
+                    # Norm the corrd difference (2 surfaces in a slab):
+                    corrd_diff = corrd_diff/(N_non_zero * A_surface * 2)
+
+                    if scores is None:
+                        scores = []
+                    scores.append(float(corrd_diff))
+
+                all_scores[miller] = scores
+
+        print(all_scores)
+        self.add_scores_to_df(all_scores)
 
     def initialize_OER_surface_studies(self, miller_indices: 
             tuple[int, int, int], 

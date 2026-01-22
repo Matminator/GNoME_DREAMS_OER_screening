@@ -1,7 +1,7 @@
 from ase import Atoms
 from pymatgen.io.ase import AseAtomsAdaptor
 
-from GNoME_DREAMS_OER_screening.OER.OER_study import OER_catalyst_study
+from gnome_dreams_oer_screening import OER_catalyst_study
 
 def test_setup():
 

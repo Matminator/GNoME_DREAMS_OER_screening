@@ -1,8 +1,8 @@
 from ase import Atoms
 from pymatgen.io.ase import AseAtomsAdaptor
 
-from GNoME_DREAMS_OER_screening.vasp.pre_defined_vasp_sets import (
-    RPBE_relax_bulk_set, RPBE_relax_surface_set 
+from gnome_dreams_oer_screening import (
+    RPBE_relax_bulk_set, RPBE_relax_surface_set,
 )
 
 

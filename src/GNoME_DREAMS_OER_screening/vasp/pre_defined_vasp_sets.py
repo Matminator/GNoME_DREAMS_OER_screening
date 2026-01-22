@@ -5,8 +5,8 @@ from pymatgen.io.vasp.sets import VaspInputSet
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.vasp import Kpoints as VaspKpoints
 
-from GNoME_DREAMS_OER_screening.vasp.dummy_sets import get_dummy_settings # material_agent.GNoME_DREAMS_OER_screening.src. ...
-from GNoME_DREAMS_OER_screening.vasp.RPBE_relax_sets import (
+from gnome_dreams_oer_screening.vasp.dummy_sets import get_dummy_settings # material_agent.GNoME_DREAMS_OER_screening.src. ...
+from gnome_dreams_oer_screening.vasp.rpbe_relax_sets import (
     get_RPBE_bulk_settings, get_RPBE_surface_settings
     )   
 

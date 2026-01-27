@@ -120,15 +120,18 @@ class OER_catalyst_study:
                 method: Literal['coordination'] 
                 = 'coordination') -> list[int]:
         
+        atoms_copy = atoms.copy()
+        atoms_copy.set_pbc(True)
+
         # Build neighbor list
-        cutoffs = natural_cutoffs(atoms)
+        cutoffs = natural_cutoffs(atoms_copy)
         nl = NeighborList(cutoffs, self_interaction=False, 
-                          bothways=True, skin = 0)
-        nl.update(atoms)
+                          bothways=True, skin = 0.3)
+        nl.update(atoms_copy)
         coord_nums = []
-        for i, atom in enumerate(atoms):
-            if method == 'non-O-coordination' and atom.symbol == 'O':
-                continue
+        for i, atom in enumerate(atoms_copy):
+            # if method == 'non-O-coordination' and atom.symbol == 'O':
+            #     continue
             indices, offsets = nl.get_neighbors(i)
             cn = len(indices)
             coord_nums.append(cn)
@@ -231,6 +234,10 @@ class OER_catalyst_study:
         # If distinct millers have not been identified yet, do it now:
         if self.distinct_millers is None:
             self.identify_distinct_surfaces(max_miller = max_miller)
+        elif self.max_miller != max_miller:
+            self.identify_distinct_surfaces(max_miller = max_miller)
+            print("OER-study-too-WARNING: max_miller changed from "
+                  f"{self.max_miller} to {max_miller}. ")
 
         slabs_for_millers = {}
         for miller_indices in self.distinct_millers:
@@ -240,7 +247,7 @@ class OER_catalyst_study:
                     initial_structure = self.bulk_structure,
                     miller_index = miller_indices,
                     min_slab_size = slab_size,
-                    min_vacuum_size = 2,
+                    min_vacuum_size = 4,
                     lll_reduce = True,
                     in_unit_planes = True,
                     center_slab = True,
@@ -253,6 +260,9 @@ class OER_catalyst_study:
                     slab_size = max_slab_size
                 
             slabs_for_millers[miller_indices] = slabs
+
+        # Saving, only for debugging purposes:
+        self.slabs_for_millers = slabs_for_millers 
             
         # ---------------------------------------------------------------------------
         # --- CODE USED BY PREVIOUS IMPLEMENTATION, TO BE DELETED IN THE FUTURE <--------------------
@@ -310,10 +320,6 @@ class OER_catalyst_study:
             scores = None # Default score if no slabs pass the filters
             if len(slabs) != 0:
                 
-                for slab in slabs:
-                    expected_coordinations = \
-                        slab.site_properties.get('bulk-custom-coord')
-
                 for slab in slabs:       
                     atoms = AseAtomsAdaptor.get_atoms(slab)
 
@@ -330,35 +336,41 @@ class OER_catalyst_study:
                     cell = atoms.get_cell()
                     A_surface = np.linalg.norm(np.cross(cell[0], 
                                                         cell[1]))
-
-                    crrosponding_bulk_coords = slab.site_properties.get(
-                        'bulk-custom-coord')
                     
-                    # For now, only consider non-zero to allow for other
-                    # methods than 'coordination', e.g., O-coordination:
-                    N_non_zero = sum(1 for x in crrosponding_bulk_coords 
-                                     if x > 0)
+                    # Determine indices of the top half of atoms in the 
+                    # surface:
+                    top_half_indices = \
+                        self.get_top_half_atom_projections(
+                            atoms, slab.normal)
 
-                    coordination_numbers = \
-                    self._determine_coordination_numbers(atoms, method)
-
-                    crrosponding_bulk_coords = np.array(
-                        crrosponding_bulk_coords)
-                    coordination_numbers = np.array(
-                        coordination_numbers)
-                    corrd_diff = np.sum(
-                        coordination_numbers - crrosponding_bulk_coords)
+                    corresponding_bulk_coords = np.array( \
+                        slab.site_properties.get('bulk-custom-coord'))
+                    corresponding_bulk_coords = \
+                        corresponding_bulk_coords[top_half_indices]
                     
-                    # Norm the corrd difference (2 surfaces in a slab):
-                    corrd_diff = corrd_diff/(N_non_zero * A_surface * 2)
-
+                    # Consider positive values. Negative values are set
+                    # indicate that the site (atom) should be ignored:
+                    N_non_zero = np.count_nonzero(
+                        corresponding_bulk_coords > -0.5)
+                    # SHOULD THIS BE USED (N_non_zero) ?? <<<--------------------------------------------------------------------------
+                    
+                    # Get coordination numbers for top half of slab:
+                    coordination_numbers = np.array( \
+                    self._determine_coordination_numbers(
+                        atoms, method))[top_half_indices]
+                
+                    corrd_diff = np.sum(coordination_numbers - 
+                                        corresponding_bulk_coords)
+                    
+                    # Norm the corrd difference:
+                    corrd_diff = corrd_diff/A_surface
+                    
                     if scores is None:
                         scores = []
                     scores.append(float(corrd_diff))
 
                 all_scores[miller] = scores
 
-        print(all_scores)
         self.add_scores_to_df(all_scores)
 
     def initialize_OER_surface_studies(self, miller_indices: 
@@ -443,7 +455,7 @@ class OER_catalyst_study:
             ) -> dict[tuple[int, int, int], tuple[OER_surface_study]]:
         return self.OER_surface_studies
 
-    def compute_slab_thickness(self, input: Atoms | Slab, 
+    def get_atom_projections_on_normal(self, input: Atoms | Slab,
                                normal_vector: np.ndarray | None = None
                                ) -> float:
         
@@ -451,8 +463,27 @@ class OER_catalyst_study:
                                                          normal_vector)
         
         pos = atoms.get_positions()
-        projections = np.dot(pos, normal_vector)
+        return np.dot(pos, normal_vector)
+
+    def compute_slab_thickness(self, input: Atoms | Slab, 
+                               normal_vector: np.ndarray | None = None
+                               ) -> float:
+        projections = self.get_atom_projections_on_normal(
+            input, normal_vector)
+    
         slab_thickness = projections.max() - projections.min()
         return slab_thickness
+    
 
-
+    def get_top_half_atom_projections(self, input: Atoms | Slab,
+            normal_vector: np.ndarray | None = None,
+            ) -> np.ndarray:
+        
+        projections = self.get_atom_projections_on_normal(
+            input, normal_vector)
+        
+        median_projection = np.median(projections)
+        indices = np.where(projections >= \
+                            median_projection)[0].astype(int)
+        
+        return indices

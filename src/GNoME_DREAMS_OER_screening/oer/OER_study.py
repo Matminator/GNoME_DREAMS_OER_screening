@@ -7,17 +7,20 @@ import pandas as pd
 from typing import Literal
 from collections import Counter
 from ase import Atoms
-from ase.visualize import view
-from ase.neighborlist import natural_cutoffs #, NeighborList
+from ase.neighborlist import natural_cutoffs
 from pymatgen.io.ase import AseAtomsAdaptor
-from pymatgen.core.surface import Slab
+from pymatgen.core.surface import Slab, Structure
 from pymatgen.core import Composition
 from pymatgen.core.surface import (
     Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-from gnome_dreams_oer_screening.oer.oer_study_utils import get_atoms_and_normal_from_input
-from gnome_dreams_oer_screening.oer.oer_surface_study import OER_surface_study
+from gnome_dreams_oer_screening.oer.oer_study_utils import (
+    get_atoms_and_normal_from_input, eval_stoichiometry_diff
+    )
+from gnome_dreams_oer_screening.oer.oer_surface_study import (
+    OER_surface_study
+)
 
 
 class OER_catalyst_study:
@@ -88,7 +91,6 @@ class OER_catalyst_study:
         # is faster and more robust, but True might give better slabs...
         self.symmetrize_slabs = False 
 
-
     def set_energies(self,
             H2O_gas_free_energy: float = None,
             H2_gas_free_energy: float = None,
@@ -98,27 +100,52 @@ class OER_catalyst_study:
             OOH_ad_correction: float = None,
             ) -> None:
         if H2O_gas_free_energy is not None:
-            self.species_energies['H2O_gas_free_energy'] = H2O_gas_free_energy
+            self.species_energies['H2O_gas_free_energy'] = \ 
+            H2O_gas_free_energy
         if H2_gas_free_energy is not None:
-            self.species_energies['H2_gas_free_energy'] = H2_gas_free_energy
+            self.species_energies['H2_gas_free_energy'] = \
+                H2_gas_free_energy
         if O2_gas_free_energy is not None:
-            self.species_energies['O2_gas_free_energy'] = O2_gas_free_energy
+            self.species_energies['O2_gas_free_energy'] = \
+                O2_gas_free_energy
         if O_ad_correction is not None:
-            self.species_energies['O_ad_correction'] = O_ad_correction
+            self.species_energies['O_ad_correction'] = \
+                O_ad_correction
         if OH_ad_correction is not None:
-            self.species_energies['OH_ad_correction'] = OH_ad_correction
+            self.species_energies['OH_ad_correction'] = \
+                OH_ad_correction
         if OOH_ad_correction is not None:
-            self.species_energies['OOH_ad_correction'] = OOH_ad_correction
+            self.species_energies['OOH_ad_correction'] = \
+                OOH_ad_correction
 
     def get_gas_and_energy_corrections(self) -> dict[str, float]:
         return self.species_energies.copy()
 
-    def get_bulk_structure(self) -> Atoms:
+    def get_bulk_atoms(self) -> Atoms:
         return self.bulk_atoms.copy()
+    
+    def get_bulk_structure(self) -> Structure:
+        return self.bulk_structure.copy()
 
     def _determine_coordination_numbers(self, atoms: Atoms,
-                method: Literal['coordination'] 
-                = 'coordination') -> list[int]:
+                method: Literal['all', 'non-O-coordination', 
+                'O-coordination']) -> list[int]:
+        """
+        Determine coordination numbers for all atoms in the given ASE
+        Atoms object, using the specified method. The method "all" gives
+        gives the corrdination numbers for all atoms given any neighbor,
+        "non-O-coordination" gives the coordination numbers for all 
+        atoms excluding oxygen (sets oxygen coordination numbers to 
+        zero). "O-coordination" gives the coordination numbers for all
+        atoms considering only oxygen neighbors (also sets oxygen 
+        coordination numbers to zero).
+        Args:
+            atoms (Atoms): ASE Atoms object representing the structure.
+            method (str): Method to compute coordination numbers.
+                          Currently only 'coordination' is implemented.
+        Returns:
+            list[int]: List of coordination numbers for each atom.
+        """
         
         atoms_copy = atoms.copy()
         atoms_copy.set_pbc(True)

@@ -179,7 +179,8 @@ class OER_catalyst_study:
 
     def identify_distinct_surfaces(self, max_miller = 1):
         self.max_miller = max_miller
-        distinct_millers = get_symmetrically_distinct_miller_indices(self.bulk_structure, max_miller)
+        distinct_millers = get_symmetrically_distinct_miller_indices(
+            self.bulk_structure, max_miller)
         df = pd.DataFrame()
         df['miller_indices'] = distinct_millers
         self.distinct_millers = distinct_millers
@@ -240,6 +241,7 @@ class OER_catalyst_study:
                   f"{self.max_miller} to {max_miller}. ")
 
         slabs_for_millers = {}
+        dev_slabs_for_millers = {}
         for miller_indices in self.distinct_millers:
             slab_size = min_slab_size
             while True:
@@ -260,9 +262,11 @@ class OER_catalyst_study:
                     slab_size = max_slab_size
                 
             slabs_for_millers[miller_indices] = slabs
+            dev_slabs_for_millers[miller_indices] = (sg, slabs)
 
         # Saving, only for debugging purposes:
-        self.slabs_for_millers = slabs_for_millers 
+        # self.slabs_for_millers = slabs_for_millers 
+        self.dev_slabs_for_millers = dev_slabs_for_millers
             
         # ---------------------------------------------------------------------------
         # --- CODE USED BY PREVIOUS IMPLEMENTATION, TO BE DELETED IN THE FUTURE <--------------------
@@ -372,6 +376,49 @@ class OER_catalyst_study:
                 all_scores[miller] = scores
 
         self.add_scores_to_df(all_scores)
+
+
+# CURRENT WORK IN PROGRESS BELOW <-----------------------------------------------------------------------------
+    def build_surfaces(self, 
+            miller_indices: tuple[int, int, int],
+            stoichiometric_variation: float = 0.1,
+            min_slab_thickness: float = 8,
+            max_slab_thickness: float = 14,
+            min_atoms = 20, 
+            max_atoms: int = 100,
+            fixed_bottom_half: bool = True,
+            vacuum: float = 12,
+            force = False
+            ) -> Atoms | None:
+        """
+        TEMP DOC
+        """
+        
+        if miller_indices in self.OER_surface_studies and not force:
+            raise ValueError("OER surface studies for the given "
+        "miller indices already exist. Use force=True to overwrite.")
+
+        accepted_slabs = []
+        normal_vectors = []
+        stop_flag = False
+        slab_thickness = min_slab_thickness
+        while True:
+            sg = SlabGenerator(
+            initial_structure = self.bulk_structure,
+            miller_index = miller_indices,
+            min_slab_size = slab_thickness,
+            min_vacuum_size = 2,
+            lll_reduce = True,
+            in_unit_planes = False,
+            center_slab = True,
+            primitive = True,
+            )
+            slabs = sg.get_slabs(symmetrize = self.symmetrize_slabs)
+
+        
+        return None
+# -------------------------------------------------------------------------------------------------------------------
+
 
     def initialize_OER_surface_studies(self, miller_indices: 
             tuple[int, int, int], 

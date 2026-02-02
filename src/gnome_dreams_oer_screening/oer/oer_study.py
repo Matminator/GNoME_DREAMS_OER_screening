@@ -100,7 +100,7 @@ class OER_catalyst_study:
             OOH_ad_correction: float = None,
             ) -> None:
         if H2O_gas_free_energy is not None:
-            self.species_energies['H2O_gas_free_energy'] = \ 
+            self.species_energies['H2O_gas_free_energy'] = \
             H2O_gas_free_energy
         if H2_gas_free_energy is not None:
             self.species_energies['H2_gas_free_energy'] = \
@@ -164,8 +164,8 @@ class OER_catalyst_study:
             elif method == 'O-coordination':
 
 
-            cn = len(indices)
-            coord_nums.append(cn)
+                cn = len(indices)
+                coord_nums.append(cn)
                 
         return coord_nums
     

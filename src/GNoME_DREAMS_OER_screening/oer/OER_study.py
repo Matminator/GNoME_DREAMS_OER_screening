@@ -128,13 +128,13 @@ class OER_catalyst_study:
         return self.bulk_structure.copy()
 
     def _determine_coordination_numbers(self, atoms: Atoms,
-                method: Literal['all', 'non-O-coordination', 
+                method: Literal['all', 'disregard-coord-of-O', 
                 'O-coordination']) -> list[int]:
         """
         Determine coordination numbers for all atoms in the given ASE
         Atoms object, using the specified method. The method "all" gives
         gives the corrdination numbers for all atoms given any neighbor,
-        "non-O-coordination" gives the coordination numbers for all 
+        "disregard-coord-of-O" gives the coordination numbers for all 
         atoms excluding oxygen (sets oxygen coordination numbers to 
         zero). "O-coordination" gives the coordination numbers for all
         atoms considering only oxygen neighbors (also sets oxygen 
@@ -157,9 +157,13 @@ class OER_catalyst_study:
         nl.update(atoms_copy)
         coord_nums = []
         for i, atom in enumerate(atoms_copy):
-            # if method == 'non-O-coordination' and atom.symbol == 'O':
-            #     continue
             indices, offsets = nl.get_neighbors(i)
+            if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
+                                                  'O-coordination']:
+                cn = 0
+            elif method == 'O-coordination':
+
+
             cn = len(indices)
             coord_nums.append(cn)
                 

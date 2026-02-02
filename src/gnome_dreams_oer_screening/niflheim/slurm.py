@@ -12,7 +12,6 @@ def get_status_my_jobs():
     return dict(line.split() for line in out.splitlines())
 
 
-
 import subprocess
 from collections import defaultdict
 

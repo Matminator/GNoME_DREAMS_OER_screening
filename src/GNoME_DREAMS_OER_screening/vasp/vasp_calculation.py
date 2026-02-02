@@ -78,6 +78,8 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     structures from the VASP calculation.
     """
 
+    directory = Path(directory)  # Ensure directory is a Path object
+
     atoms_list = read(directory / "vasprun.xml", index=":")
 
     if return_only_final:

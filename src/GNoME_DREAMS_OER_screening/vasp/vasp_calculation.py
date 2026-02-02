@@ -64,27 +64,29 @@ def run_vasp_via_custodian(
     # change back to the original directory
     os.chdir(cwd)
 
-def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
+def read_vasp_results(
+    directory: str | Path,
+    return_only_final: bool = True,
+) -> list[Atoms]:
     """
     Read VASP calculation results from a specified directory.
 
     Parameters:
-    directory (str): The directory where the VASP calculation was run.
+    directory (str | Path): The directory where the VASP calculation was run.
     return_only_final (bool): Whether to return only the final structure
-    or all intermediate structures.
+        or all intermediate structures.
 
     Returns:
-    list[Atoms]: A list of ASE Atoms objects representing the
-    structures from the VASP calculation.
+    list[Atoms]: ASE Atoms objects from the VASP calculation.
     """
+    directory = Path(directory)  # <-- normalize once
 
     atoms_list = read(directory / "vasprun.xml", index=":")
 
     if return_only_final:
-        out = [atoms_list[-1]]
-    else:
-        out = atoms_list
-    return out
+        return [atoms_list[-1]]
+
+    return atoms_list
 
 def clean_up_vasp_directory(
     directory: str, files_to_remove: list[str] = None,
@@ -157,7 +159,7 @@ def exlib_run_vasp(
         E = atoms_result.get_total_energy()
         out = {"atoms_result": atoms_result, "E": E, "error": None}
 
-        clean_up_vasp_directory(directory=directory)
+        # clean_up_vasp_directory(directory=directory)
 
     except Exception as e:
         out = {"atoms_result": None, "E": None, "error": str(e)}

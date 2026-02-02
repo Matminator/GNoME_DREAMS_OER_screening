@@ -84,6 +84,7 @@ class OER_catalyst_study:
         self.max_miller = None
         self.distinct_millers = None
         self.df_millers_ranking = None
+        self.applied_ranking_method = None
         self.OER_surface_studies = {}
 
         # --- symmetrize slabs when generating? ---
@@ -100,7 +101,7 @@ class OER_catalyst_study:
             OOH_ad_correction: float = None,
             ) -> None:
         if H2O_gas_free_energy is not None:
-            self.species_energies['H2O_gas_free_energy'] = \ 
+            self.species_energies['H2O_gas_free_energy'] = \
             H2O_gas_free_energy
         if H2_gas_free_energy is not None:
             self.species_energies['H2_gas_free_energy'] = \
@@ -126,6 +127,23 @@ class OER_catalyst_study:
     
     def get_bulk_structure(self) -> Structure:
         return self.bulk_structure.copy()
+    
+    def _get_neighborlist(self, atoms: Atoms) -> NeighborList:
+        """
+        Create and return an ASE NeighborList for the given Atoms 
+        object.
+        Args:
+            atoms (Atoms): ASE Atoms object representing the structure.
+        Returns:
+            NeighborList: ASE NeighborList object for the structure.
+        """
+        atoms.set_pbc(True)
+        
+        cutoffs = natural_cutoffs(atoms)
+        nl = NeighborList(cutoffs, self_interaction=False, 
+                          bothways=True, skin = 0.3)
+        nl.update(atoms)
+        return nl
 
     def _determine_coordination_numbers(self, atoms: Atoms,
                 method: Literal['all', 'disregard-coord-of-O', 
@@ -147,25 +165,42 @@ class OER_catalyst_study:
             list[int]: List of coordination numbers for each atom.
         """
         
-        atoms_copy = atoms.copy()
-        atoms_copy.set_pbc(True)
+        # Build neighbor list, if only one is needed:
+        if method not in ['all', 'disregard-coord-of-O']:
+            atoms_copy = atoms.copy()
+            atoms_copy.set_pbc(True)
+            # The only neighborlist that will be needed:
+            only_nl = self._get_neighborlist(atoms_copy)
 
-        # Build neighbor list
-        cutoffs = natural_cutoffs(atoms_copy)
-        nl = NeighborList(cutoffs, self_interaction=False, 
-                          bothways=True, skin = 0.3)
-        nl.update(atoms_copy)
         coord_nums = []
-        for i, atom in enumerate(atoms_copy):
-            indices, offsets = nl.get_neighbors(i)
+        for index, atom in enumerate(atoms):
             if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
                                                   'O-coordination']:
                 cn = 0
             elif method == 'O-coordination':
 
+                atoms_copy = atoms.copy()
+                atoms_copy.set_pbc(True)
 
-            cn = len(indices)
-            coord_nums.append(cn)
+                # Build list of indices to delete
+                delete_indices = [i for i, atom in enumerate(atoms)
+                    if atom.symbol != 'O' and i != index]
+                del atoms_copy[delete_indices]
+
+                index_not_O = [i for i, atom in enumerate(atoms_copy) \
+                    if atom.symbol == atom.symbol != 'O']                
+                if len(index_not_O) != 1:
+                    raise ValueError("Error in determining index of "
+                                     "non-O atom after deletion.")
+                index_in_copy = index_not_O[0]
+
+                nl = self._get_neighborlist(atoms_copy)
+                indices, offsets = nl.get_neighbors(index_in_copy)
+
+                coord_nums.append(len(indices)) # len(indices) = CN
+            else:
+                indices, offsets = only_nl.get_neighbors(index)
+                coord_nums.append(len(indices)) # len(indices) = CN
                 
         return coord_nums
     
@@ -217,51 +252,23 @@ class OER_catalyst_study:
         self.distinct_millers = distinct_millers
         self.df_millers_ranking = df
 
-    def add_scores_to_df(self, all_scores):
-        df = self.df_millers_ranking
-        df['Scores'] = None
-        df['Scores'] = df['Scores'].astype(object)
-        # Adding raw scores to df:
-        max_scores = []
-
-        for miller, scores in all_scores.items():
-            # Find the matching index
-            idx_list = df.index[df['miller_indices'] == miller].tolist()
-            if not idx_list:
-                continue
-            idx = idx_list[0]
-
-            # Store the array in the cell
-            df.at[idx, 'Scores'] = scores           # treat scores as a single object
-            df.at[idx, 'Max Score'] = np.max(scores) # numeric is fine
-        
-        df['Max Score'] = pd.to_numeric(df['Max Score'], 
-                                        errors='coerce')
-        # adding normalized scores to df:
-        try:
-            scores_values = df['Max Score'].values
-            min_score = np.nanmin(scores_values)
-            max_score = np.nanmax(scores_values)
-            normalized_scores = (scores_values - min_score)
-            normalized_scores /= (max_score - min_score)
-            df['Normalized Score'] = normalized_scores
-        except:
-            df['Normalized Score'] = float('nan')
-        self.df_millers_ranking = df
-
-    def get_df_with_surface_rankings(self) -> pd.DataFrame:
-        return self.df_millers_ranking.copy()
-        
     def predict_most_likely_surfaces(self, 
-        method: Literal['coordination', 'non-O-coordination'],
-        stoichiometry: Literal['stoichiometric', 'O-stoichiometric',
-                                 'any'],
+        method: Literal['all', 'disregard-coord-of-O',
+                         'O-coordination'] = 'all',
+        stoichiometry_tolerance: float = 0.1,
+        demand_stoichiometry_for_species: list[str] = [],
+        ignore_stoichiometry_of_species: list[str] = [],
         min_slab_size = 4, max_slab_size = 10, max_miller: int = 1
-        ):
+        ) -> None:
+        """
+        TEMP-DOC
+        """
 
+        # METHOD SOULD BE SAVED FOR FUTURE REFERENCE AND CHECKED/REFERENCE AGAINS THE APPLIED METHOD LATER <--------------------    
+        self.applied_ranking_method = method
+        
         # Ensure bulk coordination numbers are set, if needed by method:
-        if 'coordination' in method:
-            self._set_bulk_coordination(method)
+        self._set_bulk_coordination(method)
         
         # If distinct millers have not been identified yet, do it now:
         if self.distinct_millers is None:
@@ -450,6 +457,42 @@ class OER_catalyst_study:
         return None
 # -------------------------------------------------------------------------------------------------------------------
 
+
+    def add_scores_to_df(self, all_scores):
+        df = self.df_millers_ranking
+        df['Scores'] = None
+        df['Scores'] = df['Scores'].astype(object)
+        # Adding raw scores to df:
+        max_scores = []
+
+        for miller, scores in all_scores.items():
+            # Find the matching index
+            idx_list = df.index[df['miller_indices'] == miller].tolist()
+            if not idx_list:
+                continue
+            idx = idx_list[0]
+
+            # Store the array in the cell
+            df.at[idx, 'Scores'] = scores           # treat scores as a single object
+            df.at[idx, 'Max Score'] = np.max(scores) # numeric is fine
+        
+        df['Max Score'] = pd.to_numeric(df['Max Score'], 
+                                        errors='coerce')
+        # adding normalized scores to df:
+        try:
+            scores_values = df['Max Score'].values
+            min_score = np.nanmin(scores_values)
+            max_score = np.nanmax(scores_values)
+            normalized_scores = (scores_values - min_score)
+            normalized_scores /= (max_score - min_score)
+            df['Normalized Score'] = normalized_scores
+        except:
+            df['Normalized Score'] = float('nan')
+        self.df_millers_ranking = df
+
+    def get_df_with_surface_rankings(self) -> pd.DataFrame:
+        return self.df_millers_ranking.copy()
+        
 
     def initialize_OER_surface_studies(self, miller_indices: 
             tuple[int, int, int], 

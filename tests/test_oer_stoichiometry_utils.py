@@ -71,7 +71,7 @@ def test_eval_stoichiometry_diff_3():
     atoms_2 = Atoms('Cu9O1H1')
 
     result = eval_stoichiometry_diff(atoms_1, atoms_2,
-                                     species_must_be_present=False)
+                                     all_species_present=False)
     assert result is True
 
 def test_eval_stoichiometry_diff_4():
@@ -79,7 +79,7 @@ def test_eval_stoichiometry_diff_4():
     atoms_2 = Atoms('Cu9O1H1')
 
     result = eval_stoichiometry_diff(atoms_1, atoms_2,
-                                     species_must_be_present=True)
+                                     all_species_present=True)
     assert result is False
 
 def test_eval_stoichiometry_diff_5():
@@ -87,7 +87,7 @@ def test_eval_stoichiometry_diff_5():
     atoms_2 = Atoms('Cu9O1H1')
 
     result = eval_stoichiometry_diff(atoms_1, atoms_2,
-                                     species_must_be_present=True,
+                                     all_species_present=True,
                                      ignore_species=['H']
                                      )
     assert result is True
@@ -97,33 +97,20 @@ def test_eval_stoichiometry_diff_6():
     atoms_2 = Atoms('Cu9O2H1')
 
     result = eval_stoichiometry_diff(atoms_1, atoms_2,
-                                     species_must_be_present=True,
-                                     stoichiometric_match_species=['O'],
+                                     all_species_present=True,
+                                     max_diff_dict={'O': 0.0001},
                                      ignore_species=['H']
                                      )
     assert result is False
 
 def test_eval_stoichiometry_diff_7():
-    atoms_1 = Atoms('Cu10OB')
+    atoms_1 = Atoms('Cu10O')
     atoms_2 = Atoms('Cu9O1H1')
 
     result = eval_stoichiometry_diff(atoms_1, atoms_2,
-                                     species_must_be_present=False,
-                                     stoichiometric_match_species=['O'],
+                                     all_species_present=False,
+                                     max_diff_dict={'O': 0.0001},
                                      ignore_species=['H']
                                      )
     assert result is True
 
-def test_eval_stoichiometry_diff_8():
-    atoms_1 = Atoms('Cu10O')
-    atoms_2 = Atoms('Cu9O1H1')
-
-    try:
-        result = eval_stoichiometry_diff(atoms_1, atoms_2,
-                                species_must_be_present=True,
-                                stoichiometric_match_species=['O', 'H'],
-                                ignore_species=['H']
-                                         )
-    except ValueError as e:
-        assert str(e) == "Species cannot be both in \
-            stoichiometric_match_species and ignore_species."

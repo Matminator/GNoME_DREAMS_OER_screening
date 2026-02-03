@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 from ase import Atoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab, Structure
@@ -69,8 +70,8 @@ def get_stoichiometry_diff(dict1: dict, dict2: dict) -> dict:
 def eval_stoichiometry_diff(
         config_1: Atoms | Structure, config_2: Atoms | Structure,
         max_diff: float = .1,
-        species_must_be_present: bool = True,
-        stoichiometric_match_species: list[str] = [],
+        max_diff_dict: dict = {},
+        all_species_present: bool = True,
         ignore_species: list[str] = [],
         ) -> bool:
     """
@@ -83,12 +84,12 @@ def eval_stoichiometry_diff(
         max_diff (float, optional): Maximum allowed stoichiometry 
             difference for species not in 
             stoichiometric_match_species. Defaults to .1.
-        species_must_be_present (bool, optional): Whether all species
+        all_species_present (bool, optional): Whether all species
             in the stoichiometry difference dict must be present
             (non-negative) in both configurations. Defaults to True.
-        stoichiometric_match_species (list[str], optional): List of 
-            species which must match exactly between the two 
-            configurations. Defaults to [].
+        max_diff_dict (dict | None, optional): Maximum allowed 
+            stoichiometry difference for specific species. Defaults to 
+            {}.
         ignore_species (list[str], optional): List of species to ignore
             when evaluating stoichiometry difference. Defaults to [].
 
@@ -97,12 +98,13 @@ def eval_stoichiometry_diff(
         False otherwise.
     """
     
-    # Check that no species is both in stoichiometric_match_species and 
+    # Check that no species is both in max_diff_dict and
     # ignore_species:
-    for species in stoichiometric_match_species:
+    for species in max_diff_dict.keys():
         if species in ignore_species:
-            raise ValueError("Species cannot be both in \
-            stoichiometric_match_species and ignore_species.")
+            warnings.warn("Putting a species in both max_diff_dict" \
+            " and ignore_species may lead to unintended " \
+            "behavior.", UserWarning, stacklevel=2)
     
     # get_stoichiometry_dict: agnostic to atoms or structure:
     dict1 = get_stoichiometry_dict(config_1) 
@@ -116,16 +118,22 @@ def eval_stoichiometry_diff(
     for species in ignore_species:
         diff_dict.pop(species, None)
 
-    # Check that species in stoichiometric_match_species
-    for species in stoichiometric_match_species:
+    # --- Starting checkes which may return False early: ---------------
+    # Check that no species is missing if all_species_present:
+    if np.min(list(diff_dict.values())) < -1e-4 and all_species_present:
+        return False
+
+    # Check species in max_diff_dict:
+    for species, max_species_diff in max_diff_dict.items():
         if species in diff_dict:
-            if np.abs(diff_dict[species]) > 1e-4:
+            if np.abs(diff_dict[species]) > max_species_diff:
                 return False
-        
-    if min(list(diff_dict.values())) < 0 and species_must_be_present:
-        return False
-    elif max(np.abs(list(diff_dict.values()))) <= max_diff:
-        return True
-    else:
-        return False
+            # Remove species from diff_dict to avoid checking later
+            diff_dict.pop(species, None)
+    
+    if len(diff_dict) != 0:
+        if np.max(np.abs(list(diff_dict.values()))) > max_diff:
+            return False
+
+    return True
 # --- End Stoichiometry utils ------------------------------------------

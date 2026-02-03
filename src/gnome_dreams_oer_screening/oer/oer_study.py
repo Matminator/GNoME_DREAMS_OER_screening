@@ -16,7 +16,8 @@ from pymatgen.core.surface import (
 from ase.neighborlist import NeighborList, natural_cutoffs
 
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
-    get_atoms_and_normal_from_input, eval_stoichiometry_diff
+    get_atoms_and_normal_from_input, eval_stoichiometry_diff,
+    get_stoichiometry_diff, get_stoichiometry_dict
     )
 from gnome_dreams_oer_screening.oer.oer_surface_study import (
     OER_surface_study
@@ -96,11 +97,6 @@ class OER_catalyst_study:
         self.df_millers_ranking = None
         self.applied_ranking_method = None
         self.OER_surface_studies = {}
-
-        # --- symmetrize slabs when generating? ---
-        # Currently always unknown if True or False is better. False 
-        # is faster and more robust, but True might give better slabs...
-        self.symmetrize_slabs = False 
 
     def set_energies(self,
             H2O_gas_free_energy: float = None,
@@ -246,18 +242,23 @@ class OER_catalyst_study:
     
 
 # CURRENT WORK IN PROGRESS BELOW <-----------------------------------------------------------------------------
+
+# to do, CONSIDER SELECTING THE ONE WITH THE MOST O-STOGIOMETIC SLAB
+
     def _build_surfaces(self, 
             miller_indices: tuple[int, int, int],
-            stoichiometry_tolerance: float,
-            demand_stoichiometry_for_species: list[str],
-            ignore_stoichiometry_of_species: list[str],
-            species_must_be_present: bool,
-            min_slab_thickness: float = 10,
+            stoichiometry_tolerance: float = 0.2,
+            max_diff_dict: dict = {},
+            ignore_stoichiometry_of_species: list[str] = [],
+            all_species_present: bool = True,
+            symmetrize: bool = True,
+            select_closest_O_stoichiometry: bool = True,
+            min_slab_thickness: float = 9,
             max_slab_thickness: float = 18,
             min_atoms = 20, 
-            max_atoms: int = 100,
+            max_atoms: int = 120,
             vacuum: float = 12,
-            symmetrize: bool = True,
+            max_layers: int = 8,
             ) -> Atoms | None:
         """
         TEMP DOC
@@ -265,7 +266,7 @@ class OER_catalyst_study:
 
         num_layers = 2
         while True:
-            if num_layers > 10:
+            if num_layers > max_layers:
                 break
             sg = SlabGenerator(
             initial_structure = self.bulk_structure.copy(),
@@ -278,20 +279,8 @@ class OER_catalyst_study:
             primitive = True,
             )
             slabs = sg.get_slabs(symmetrize = symmetrize)
+            
             # Check if any slabs were generated, if not, retry:
-
-            if len(slabs) == 0:
-                num_layers += 1
-                continue
-
-            # Filter out slabs which never will adhere to the 
-            # stoichiometry criteria:
-            slabs = [slab for slab in slabs if eval_stoichiometry_diff(
-                slab, self.bulk_structure, max_diff = 1,
-                stoichiometric_match_species = 
-                demand_stoichiometry_for_species,
-                ignore_species = ignore_stoichiometry_of_species
-                )]
             if len(slabs) == 0:
                 num_layers += 1
                 continue
@@ -312,23 +301,46 @@ class OER_catalyst_study:
             if not all([eval_stoichiometry_diff(
                     slab, self.bulk_structure,
                     max_diff = stoichiometry_tolerance,
-                    stoichiometric_match_species = 
-                    demand_stoichiometry_for_species,
+                    max_diff_dict = max_diff_dict,
                     ignore_species = ignore_stoichiometry_of_species,
-                    species_must_be_present = species_must_be_present
+                    all_species_present = all_species_present
                     ) for slab in slabs]):
                 num_layers += 1
                 continue
             
             break
 
-        if len(slabs) != 0:
+# MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS <-------------------------------------
+        slabs = [slab for slab in slabs if len(slab) <= max_atoms]
+        slabs = [slab for slab in slabs if 
+                    self.compute_slab_thickness(slab)
+                    <= max_slab_thickness]
+        
+        # Select slab with closest O stoichiometry to bulk, if enabled:
+        if select_closest_O_stoichiometry:
+            min_O_stoichiometry_diff = float('inf')
+            for slab in slabs:
+                dict_1 = get_stoichiometry_dict(self.bulk_structure)
+                dict_2 = get_stoichiometry_dict(slab)
+                diff_dict = get_stoichiometry_diff(dict_1, dict_2)
+                O_diff = abs(diff_dict.get('O', 0.0))
+                if O_diff < min_O_stoichiometry_diff:
+                    min_O_stoichiometry_diff = O_diff
 
-            slabs = [slab for slab in slabs if len(slab) <= max_atoms]
-            slabs = [slab for slab in slabs if 
-                     self.compute_slab_thickness(slab)
-                       <= max_slab_thickness]
-            
+            selected_slabs = []
+            for slab in slabs:
+                dict_1 = get_stoichiometry_dict(self.bulk_structure)
+                dict_2 = get_stoichiometry_dict(slab)
+                diff_dict = get_stoichiometry_diff(dict_1, dict_2)
+                O_diff = abs(diff_dict.get('O', 0.0))
+                if np.abs(O_diff - min_O_stoichiometry_diff) \
+                    < 1/max_atoms:
+                    selected_slabs.append(slab)
+
+            print(f"Selected {len(selected_slabs)} slabs out of ",
+                    f"{len(slabs)} based on closest O-stoichiometry.")
+            slabs = selected_slabs              
+
         return slabs        
 # -------------------------------------------------------------------------------------------------------------------
 

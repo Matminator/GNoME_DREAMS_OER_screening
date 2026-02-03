@@ -22,6 +22,16 @@ from gnome_dreams_oer_screening.oer.oer_surface_study import (
     OER_surface_study
 )
 
+# Suppress specific warnings from pymatgen about too many sites removed.
+# These warnings can occur during slab generation and are handled be 
+# the code logic, so they can be safely ignored.
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Too many sites removed, please use a larger slab",
+    category=UserWarning,
+)
+
 
 class OER_catalyst_study:
     """
@@ -129,16 +139,7 @@ class OER_catalyst_study:
         return self.bulk_structure.copy()
     
     def _get_neighborlist(self, atoms: Atoms) -> NeighborList:
-        """
-        Create and return an ASE NeighborList for the given Atoms 
-        object.
-        Args:
-            atoms (Atoms): ASE Atoms object representing the structure.
-        Returns:
-            NeighborList: ASE NeighborList object for the structure.
-        """
         atoms.set_pbc(True)
-        
         cutoffs = natural_cutoffs(atoms)
         nl = NeighborList(cutoffs, self_interaction=False, 
                           bothways=True, skin = 0.3)
@@ -242,6 +243,95 @@ class OER_catalyst_study:
             result = slab_comp.reduced_formula == bulk_comp.reduced_formula
 
         return result
+    
+
+# CURRENT WORK IN PROGRESS BELOW <-----------------------------------------------------------------------------
+    def _build_surfaces(self, 
+            miller_indices: tuple[int, int, int],
+            stoichiometry_tolerance: float,
+            demand_stoichiometry_for_species: list[str],
+            ignore_stoichiometry_of_species: list[str],
+            species_must_be_present: bool,
+            min_slab_thickness: float = 10,
+            max_slab_thickness: float = 18,
+            min_atoms = 20, 
+            max_atoms: int = 100,
+            vacuum: float = 12,
+            symmetrize: bool = True,
+            ) -> Atoms | None:
+        """
+        TEMP DOC
+        """
+
+        num_layers = 2
+        while True:
+            if num_layers > 10:
+                break
+            sg = SlabGenerator(
+            initial_structure = self.bulk_structure.copy(),
+            miller_index = miller_indices,
+            min_slab_size = num_layers,
+            min_vacuum_size = vacuum,
+            lll_reduce = True,
+            in_unit_planes = True,
+            center_slab = True,
+            primitive = True,
+            )
+            slabs = sg.get_slabs(symmetrize = symmetrize)
+            # Check if any slabs were generated, if not, retry:
+
+            if len(slabs) == 0:
+                num_layers += 1
+                continue
+
+            # Filter out slabs which never will adhere to the 
+            # stoichiometry criteria:
+            slabs = [slab for slab in slabs if eval_stoichiometry_diff(
+                slab, self.bulk_structure, max_diff = 1,
+                stoichiometric_match_species = 
+                demand_stoichiometry_for_species,
+                ignore_species = ignore_stoichiometry_of_species
+                )]
+            if len(slabs) == 0:
+                num_layers += 1
+                continue
+
+            # Test if slabs are thick enough, if not, retry:
+            thicknesses = [self.compute_slab_thickness(slab) for slab in
+                            slabs]
+            if np.min(thicknesses) < min_slab_thickness:
+                num_layers += 1
+                continue
+            
+            # Test if slabs have enough atoms, if not, retry:
+            num_atoms = [len(slab) for slab in slabs]
+            if np.min(num_atoms) < min_atoms:
+                num_layers += 1
+                continue
+
+            if not all([eval_stoichiometry_diff(
+                    slab, self.bulk_structure,
+                    max_diff = stoichiometry_tolerance,
+                    stoichiometric_match_species = 
+                    demand_stoichiometry_for_species,
+                    ignore_species = ignore_stoichiometry_of_species,
+                    species_must_be_present = species_must_be_present
+                    ) for slab in slabs]):
+                num_layers += 1
+                continue
+            
+            break
+
+        if len(slabs) != 0:
+
+            slabs = [slab for slab in slabs if len(slab) <= max_atoms]
+            slabs = [slab for slab in slabs if 
+                     self.compute_slab_thickness(slab)
+                       <= max_slab_thickness]
+            
+        return slabs        
+# -------------------------------------------------------------------------------------------------------------------
+
 
     def identify_distinct_surfaces(self, max_miller = 1):
         self.max_miller = max_miller
@@ -414,49 +504,6 @@ class OER_catalyst_study:
                 all_scores[miller] = scores
 
         self.add_scores_to_df(all_scores)
-
-
-# CURRENT WORK IN PROGRESS BELOW <-----------------------------------------------------------------------------
-    def build_surfaces(self, 
-            miller_indices: tuple[int, int, int],
-            stoichiometric_variation: float = 0.1,
-            min_slab_thickness: float = 8,
-            max_slab_thickness: float = 14,
-            min_atoms = 20, 
-            max_atoms: int = 100,
-            fixed_bottom_half: bool = True,
-            vacuum: float = 12,
-            force = False
-            ) -> Atoms | None:
-        """
-        TEMP DOC
-        """
-        
-        if miller_indices in self.OER_surface_studies and not force:
-            raise ValueError("OER surface studies for the given "
-        "miller indices already exist. Use force=True to overwrite.")
-
-        accepted_slabs = []
-        normal_vectors = []
-        stop_flag = False
-        slab_thickness = min_slab_thickness
-        while True:
-            sg = SlabGenerator(
-            initial_structure = self.bulk_structure,
-            miller_index = miller_indices,
-            min_slab_size = slab_thickness,
-            min_vacuum_size = 2,
-            lll_reduce = True,
-            in_unit_planes = False,
-            center_slab = True,
-            primitive = True,
-            )
-            slabs = sg.get_slabs(symmetrize = self.symmetrize_slabs)
-
-        
-        return None
-# -------------------------------------------------------------------------------------------------------------------
-
 
     def add_scores_to_df(self, all_scores):
         df = self.df_millers_ranking

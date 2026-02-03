@@ -89,6 +89,8 @@ def eval_stoichiometry_diff(
         stoichiometric_match_species (list[str], optional): List of 
             species which must match exactly between the two 
             configurations. Defaults to [].
+        ignore_species (list[str], optional): List of species to ignore
+            when evaluating stoichiometry difference. Defaults to [].
 
     Returns:
         bool: True if the stoichiometry difference meets the criteria,
@@ -98,7 +100,6 @@ def eval_stoichiometry_diff(
     # Check that no species is both in stoichiometric_match_species and 
     # ignore_species:
     for species in stoichiometric_match_species:
-        print(species)
         if species in ignore_species:
             raise ValueError("Species cannot be both in \
             stoichiometric_match_species and ignore_species.")
@@ -118,7 +119,7 @@ def eval_stoichiometry_diff(
     # Check that species in stoichiometric_match_species
     for species in stoichiometric_match_species:
         if species in diff_dict:
-            if np.abs(diff_dict[species]) < 1e-4:
+            if np.abs(diff_dict[species]) > 1e-4:
                 return False
         
     if min(list(diff_dict.values())) < 0 and species_must_be_present:

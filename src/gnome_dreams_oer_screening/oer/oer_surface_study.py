@@ -133,6 +133,11 @@ class OER_surface_study:
     
     def _determine_adsorption_sites(self, surface: Atoms,
                                     top_layer_tol: float = 1.5):
+        
+
+# THERE NEEDS TO BE IMPLIMENTED A MOR SOFISTICATED WAY OF DETERMINING ADSORPTION SITES !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# This could for instance invlove using neighbor lists to find close naiboring atoms etc.
+
 
         # Determining top metal (non-O) layer:
         metal_indices = [i for i, atom in enumerate(surface) 

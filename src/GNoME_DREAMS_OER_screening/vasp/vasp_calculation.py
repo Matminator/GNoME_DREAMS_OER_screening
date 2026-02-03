@@ -117,3 +117,57 @@ def clean_up_vasp_directory(
                 file.unlink()
         except Exception as e:
             print(f"Could not remove {file}: {e}")
+            
+def exlib_run_vasp(
+    directory, 
+    return_vasp_out = True,
+    handlers = [VaspErrorHandler()],
+    vasp_cmd = ["mpiexec", "vasp_std"],
+    auto_npar = True,
+    max_errors = 20
+    ):
+    """
+    Function for running a VASP calculation via Custodian and returning
+    results.
+
+    Parameters:
+    directory (PathLike): directory where VASP calculation will be run.
+    return_vasp_out (bool): Whether to return the content of vasp.out
+    file.
+    handlers (list): A list of Custodian error handlers to use.
+    vasp_cmd (list): The command to run VASP.
+    auto_npar (bool): Whether Custodian should automatically adjust 
+    NPAR.
+    max_errors (int): Maximum number of errors to tolerate by Custodian
+    before terminating the calculation.
+    """
+    
+    try:
+        run_vasp_via_custodian(
+            directory=directory,
+            handlers=handlers,
+            vasp_cmd=vasp_cmd,
+            auto_npar=auto_npar,
+            max_errors=max_errors
+        )
+
+        atoms_result = read_vasp_results(
+            directory=directory,
+            return_only_final=True
+        )[0]
+        E = atoms_result.get_total_energy()
+        out = {"atoms_result": atoms_result, "E": E, "error": None}
+
+        clean_up_vasp_directory(directory=directory)
+
+    except Exception as e:
+        out = {"atoms_result": None, "E": None, "error": str(e)}
+
+    if return_vasp_out:
+        with open(directory / "vasp.out", "r") as f:
+            vasp_text = f.read()
+        out["vasp_out"] = vasp_text
+    else:
+        out["vasp_out"] = None
+
+    return out

@@ -1,8 +1,14 @@
+
 import os
 from pathlib import Path
 
+import numpy as np
+from langchain.agents import tool
+
 from ase import Atoms
-from ase.io import read
+from ase.io import read, Trajectory
+from pymatgen.core.surface import Structure
+from pymatgen.io.ase import AseAtomsAdaptor
 
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
@@ -21,6 +27,11 @@ from custodian.vasp.handlers import (
     PotimErrorHandler, # only relaxation handler
     DriftErrorHandler, # only relaxation handler
     WalltimeHandler
+)
+from pyparsing import Literal
+
+from gnome_dreams_oer.vasp.pre_defined_vasp_sets import (
+    RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet
 )
 
 def run_vasp_via_custodian(
@@ -172,3 +183,134 @@ def exlib_run_vasp(
         out["vasp_out"] = None
 
     return out
+
+def save_fake_results_to_traj(directory: Path, atoms: Atoms):
+    out_traj = Trajectory(directory / "fake_result.traj", "w")
+    out_traj.write(atoms)
+    out_traj.close()
+
+class calculational_setup():
+
+    def __init__(self, 
+                 mode: Literal['test', 'production_test', 'production'] 
+                 = 'production',
+                 bulk_set = RPBE_relax_bulk_set,
+                 surface_set = RPBE_relax_surface_set
+                 ) -> None:
+        self.mode = mode
+
+        # Setup of test modes:
+        if mode == 'production_test':
+            self.bulk_set = TestRelaxSet
+            self.surface_set = TestRelaxSet
+
+    def bulk_relaxation(self, structure: Structure, directory: Path
+                        ) -> None:
+        vasp_set = self.bulk_set(structure = structure)
+        vasp_set.write_input(directory, potcar_spec = False if 
+                             self.mode =='production' else True)
+        
+        if 'test' in self.mode:
+            atoms = AseAtomsAdaptor.get_atoms(structure)
+            fake_energy = len(atoms)
+            atoms[0].charge = fake_energy  # just to store energy
+            save_fake_results_to_traj(directory, atoms)
+        
+    def surface_relaxation(self, structure: Structure, directory: Path
+                           ) -> None:
+        vasp_set = self.surface_set(structure = structure)
+        vasp_set.write_input(directory, potcar_spec = False if 
+                             self.mode =='production' else True)
+        
+        if 'test' in self.mode:
+            atoms = AseAtomsAdaptor.get_atoms(structure)
+            
+            # Fake energy calculation:
+            fake_energy = len(atoms) * 2.46 + 2*np.random.rand() - 1
+            if 'H' in atoms.symbols():
+                fake_energy += -3.69            
+            atoms[0].charge = fake_energy  # just to store energy
+            save_fake_results_to_traj(directory, atoms)
+
+class job_submitter():
+    def __init__(self, explog, 
+        mode: Literal["test", "production_test", "production"]
+          = "production"):
+        self.explog = explog
+        self.mode = mode
+        self.calc_setup = calculational_setup(mode=mode)
+
+    @tool
+    def submit_vasp_calculation(
+        self,
+        candidate_id, # <------- DO WE KNOW WHAT TYPE THIS IS?
+        calculation_type: Literal["bulk_relaxation", 
+            "surface_relaxation", "O_adsorption", 'OH_adsorption'],
+        directory: str,
+        custodian_handlers: list = [VaspErrorHandler(),
+        MeshSymmetryErrorHandler(), NonConvergingErrorHandler(),
+        UnconvergedErrorHandler(), FrozenJobErrorHandler(), StdErrHandler(),
+        # LargeSigmaHandler(), IncorrectSmearingHandler(),
+        PositiveEnergyErrorHandler()
+                                    ],
+        vasp_cmd: list = ["mpiexec", "vasp_std"],
+        max_errors: int = 20
+        ) -> dict:
+
+
+        # Get the candidate row from the ExpLog:
+        cand_row = self.explog.candidates_df[candidate_id]
+        processes_df = self.explog.candidates[candidate_id].processes.df
+        study = cand_row["study_obj"]
+
+        if calculation_type == "bulk":
+
+            # Test if there are any non-bulk processes:
+            if not (processes_df['job_type'] ==
+                     'bulk_relaxation').all():
+                message = "ERROR: Non-bulk relaxation jobs has" \
+                " already been submitted for this candidate:" \
+                f" {candidate_id}. As surface and adsorption " \
+                "calculations already has been made, no bulk " \
+                "calculations should be submitted as this would " \
+                "invalidate these calculations."
+                return message
+
+            init_structure = study.get_init_structure()
+
+            self.calc_setup.bulk_relaxation(init_structure, directory)
+
+            # Need to sumbmit job...
+
+        if calculation_type == "surface":
+
+            # Test 
+
+
+
+
+
+
+
+"""
+NOTE FOR FUTURE:
+
+Initial structure
+       |
+       v
+Static SCF (ISMEAR=0, SIGMA=0.05)
+       |
+       v
+Handlers check:
+   - LargeSigmaHandler
+   - IncorrectSmearingHandler
+       |
+       v
+Determine electronic type:
+   - Metal -> ISMEAR=1/2, SIGMA=0.2
+   - Insulator -> ISMEAR=-5
+       |
+       v
+Relaxation calculation (NSW>0)
+
+"""

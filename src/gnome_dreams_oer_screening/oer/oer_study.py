@@ -63,7 +63,7 @@ class OER_catalyst_study:
     """
 
 
-    def __init__(self, bulk = Atoms,    
+    def __init__(self, init_bulk = Atoms,    
                  H2O_gas_free_energy = float,
                  H2_gas_free_energy = float,
                  O2_gas_free_energy: float = None,
@@ -73,8 +73,12 @@ class OER_catalyst_study:
                  bulk_energy: float = None,
                  ):
         
-        self.bulk_structure = AseAtomsAdaptor.get_structure(bulk)
-        self.bulk_atoms = bulk
+        self.init_structure = AseAtomsAdaptor.get_structure(init_bulk)
+        self.init_atoms = init_bulk
+        
+        self.bulk_structure = None
+        self.bulk_atoms = None
+
         if bulk_energy is None:
             try:
                 self.bulk_energy = bulk.get_potential_energy()
@@ -97,6 +101,18 @@ class OER_catalyst_study:
         self.df_millers_ranking = None
         self.applied_ranking_method = None
         self.OER_surface_studies = {}
+
+    def get_init_structure(self) -> Structure:
+        return self.init_structure.copy()
+    
+    def get_init_atoms(self) -> Atoms:
+        return self.init_atoms.copy()
+
+    def set_bulk_structure(self, bulk_structure: Structure) -> None:
+        self.bulk_structure = bulk_structure.copy()
+        self.bulk_atoms = AseAtomsAdaptor.get_atoms(bulk_structure)
+
+# THERE SHOULD BE A STATUS INDICATING THE PROGRESS OF THE STUDY <------------------------------------------------------------
 
     def set_energies(self,
             H2O_gas_free_energy: float = None,

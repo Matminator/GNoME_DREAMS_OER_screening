@@ -58,7 +58,7 @@ class OER_surface_study:
                  OER_catalyst_study,
                  input_surface: Atoms | Slab,
                  normal_vector: np.ndarray | None = None,
-                 fixed_bottom_half: bool = True, vacuum: float = 8
+                 fixed_bottom_half: bool = True, vacuum: float = 12
                  ):
     
         # Make sure that the surfaces is on the form of an ASE Atoms 

@@ -40,7 +40,7 @@ class OER_catalyst_study:
     a bulk structure, for the purpose of OER catalyst screening. All 
     data related to computation of adsorption energies is stored in this
     class. Surfaces are initialized as OER_surface_study instances, via 
-    the method 'initialize_OER_surface_studies', and stored in a 
+    the method 'initialize_oer_surface_study', and stored in a 
     dictionary, with miller indices as keys. Surface structures with 
     adsorbates are managed in the OER_surface_study instances. Gas phase
     free energies of H2O, H2, O2 are stored in this class, in addition 
@@ -48,7 +48,7 @@ class OER_catalyst_study:
     adsorption energies.
 
     Args:
-        bulk (Atoms): Bulk structure of the catalyst material.
+        init_bulk (Atoms): the unrelaxed bulk structure of the catalyst.
         H2O_gas_free_energy (float): Free energy of H2O in gas phase.
         H2_gas_free_energy (float): Free energy of H2 in gas phase.
         O2_gas_free_energy (float, optional): Free energy of O2 in gas
@@ -60,33 +60,31 @@ class OER_catalyst_study:
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
         bulk_energy (float, optional): Energy of the bulk structure.
+        use_init_as_relaxed_bulk (bool, optional): Whether to use the
+        initial bulk structure as the relaxed bulk structure.
     """
 
 
-    def __init__(self, init_bulk = Atoms,    
+    def __init__(self, init_atoms = Atoms,    
                  H2O_gas_free_energy = float,
                  H2_gas_free_energy = float,
                  O2_gas_free_energy: float = None,
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
-                 bulk_energy: float = None,
+                 use_init_as_relaxed_bulk: bool = False,
                  ):
         
-        self.init_structure = AseAtomsAdaptor.get_structure(init_bulk)
-        self.init_atoms = init_bulk
+        self.init_atoms = init_atoms
+        self.init_structure = AseAtomsAdaptor.get_structure(init_atoms)
         
-        self.bulk_structure = None
-        self.bulk_atoms = None
-
-        if bulk_energy is None:
-            try:
-                self.bulk_energy = bulk.get_potential_energy()
-            except:
-                self.bulk_energy = None
+        if use_init_as_relaxed_bulk:
+            self.bulk_atoms = self.init_atoms.copy()
+            self.bulk_structure = self.init_structure.copy()
         else:
-            self.bulk_energy = bulk_energy
-
+            self.bulk_atoms = None
+            self.bulk_structure = None
+            
         self.species_energies = {
             'H2O_gas_free_energy': H2O_gas_free_energy,
             'H2_gas_free_energy': H2_gas_free_energy,
@@ -98,21 +96,34 @@ class OER_catalyst_study:
 
         self.max_miller = None
         self.distinct_millers = None
-        self.df_millers_ranking = None
+        self.termination_ranking_df = None
+        self.terminations = {}
         self.applied_ranking_method = None
-        self.OER_surface_studies = {}
+        self.oer_surface_studies = {}
 
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()
     
     def get_init_atoms(self) -> Atoms:
         return self.init_atoms.copy()
+    
+    def set_bulk_structure(self, relaxed_bulk: Atoms | Structure
+                           ) -> None:
+        
+        # <<<<---------------------------------------------------------- SHOULD TEST IF SURFACES HAS BEEN CREATED
+        
+        if not isinstance(relaxed_bulk, Atoms):
+            relaxed_bulk = AseAtomsAdaptor.get_structure(
+                relaxed_bulk)
+            bulk_atoms = relaxed_bulk
+        elif isinstance(relaxed_bulk, Structure):
+            bulk_structure = relaxed_bulk      
+            bulk_atoms = AseAtomsAdaptor.get_atoms(relaxed_bulk)
 
-    def set_bulk_structure(self, bulk_structure: Structure) -> None:
-        self.bulk_structure = bulk_structure.copy()
-        self.bulk_atoms = AseAtomsAdaptor.get_atoms(bulk_structure)
 
-# THERE SHOULD BE A STATUS INDICATING THE PROGRESS OF THE STUDY <------------------------------------------------------------
+    def get_study_progress(self):
+        pass
+        # <<<<---------------------------------------------------------- THERE SHOULD BE A STATUS INDICATING THE PROGRESS OF THE STUDY
 
     def set_energies(self,
             H2O_gas_free_energy: float = None,
@@ -149,6 +160,12 @@ class OER_catalyst_study:
     
     def get_bulk_structure(self) -> Structure:
         return self.bulk_structure.copy()
+
+    def get_distinct_millers(self) -> list[tuple[int, int, int]] | None:
+        return self.distinct_millers.copy()
+    
+    def get_terminations_dict(self) -> dict[int, Slab]:
+        return self.terminations.copy()
     
     def _get_neighborlist(self, atoms: Atoms) -> NeighborList:
         atoms.set_pbc(True)
@@ -157,6 +174,7 @@ class OER_catalyst_study:
                           bothways=True, skin = 0.3)
         nl.update(atoms)
         return nl
+
 
     def _determine_coordination_numbers(self, atoms: Atoms,
                 method: Literal['all', 'disregard-coord-of-O', 
@@ -179,17 +197,19 @@ class OER_catalyst_study:
         """
         
         # Build neighbor list, if only one is needed:
-        if method not in ['all', 'disregard-coord-of-O']:
+        if method in ['all', 'disregard-coord-of-O']:
             atoms_copy = atoms.copy()
             atoms_copy.set_pbc(True)
             # The only neighborlist that will be needed:
             only_nl = self._get_neighborlist(atoms_copy)
+        else:
+            only_nl = None
 
         coord_nums = []
         for index, atom in enumerate(atoms):
             if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
                                                   'O-coordination']:
-                cn = 0
+                cn = 0 # O atoms are ignored
             elif method == 'O-coordination':
 
                 atoms_copy = atoms.copy()
@@ -234,36 +254,34 @@ class OER_catalyst_study:
         self.bulk_structure.add_site_property("bulk-custom-coord", 
                                               coord_numbers)
 
-    def _compare_to_bulk_stoichiometry(self, atoms: Atoms,
-                compare_O_only_stoichiometry: bool = False) -> bool:
+
+    # --- THIS IS DEPRECATED -------------------------------------------
+    # def _compare_to_bulk_stoichiometry(self, atoms: Atoms,
+    #             compare_O_only_stoichiometry: bool = False) -> bool:
         
-        slab_symbols = [atom.symbol for atom in atoms]
-        slab_counts = Counter(slab_symbols)
-        slab_comp = Composition(dict(slab_counts))
-        slab_reduced, slab_rfactor = slab_comp.get_reduced_composition_and_factor()
+    #     slab_symbols = [atom.symbol for atom in atoms]
+    #     slab_counts = Counter(slab_symbols)
+    #     slab_comp = Composition(dict(slab_counts))
+    #     slab_reduced, slab_rfactor = slab_comp.get_reduced_composition_and_factor()
 
-        bulk_symbols = [atom.symbol for atom in self.bulk_atoms]
-        bulk_counts = Counter(bulk_symbols)
-        bulk_comp = Composition(dict(bulk_counts))
-        bulk_reduced, bulk_rfactor = bulk_comp.get_reduced_composition_and_factor()
+    #     bulk_symbols = [atom.symbol for atom in self.bulk_atoms]
+    #     bulk_counts = Counter(bulk_symbols)
+    #     bulk_comp = Composition(dict(bulk_counts))
+    #     bulk_reduced, bulk_rfactor = bulk_comp.get_reduced_composition_and_factor()
 
-        if compare_O_only_stoichiometry:
-            slab_num_O = slab_reduced.get("O", 0)
-            bulk_num_O = bulk_reduced.get("O", 0)
-            result = slab_num_O == bulk_num_O
-        else:
-            result = slab_comp.reduced_formula == bulk_comp.reduced_formula
+    #     if compare_O_only_stoichiometry:
+    #         slab_num_O = slab_reduced.get("O", 0)
+    #         bulk_num_O = bulk_reduced.get("O", 0)
+    #         result = slab_num_O == bulk_num_O
+    #     else:
+    #         result = slab_comp.reduced_formula == bulk_comp.reduced_formula
 
-        return result
-    
-
-# CURRENT WORK IN PROGRESS BELOW <-----------------------------------------------------------------------------
-
-# to do, CONSIDER SELECTING THE ONE WITH THE MOST O-STOGIOMETIC SLAB
+    #     return result
+    # --- END DEPRECATION ----------------------------------------------
 
     def _build_surfaces(self, 
             miller_indices: tuple[int, int, int],
-            stoichiometry_tolerance: float = 0.2,
+            stoichiometry_tolerance: float = 0.1,
             max_diff_dict: dict = {},
             ignore_stoichiometry_of_species: list[str] = [],
             all_species_present: bool = True,
@@ -271,10 +289,11 @@ class OER_catalyst_study:
             select_closest_O_stoichiometry: bool = True,
             min_slab_thickness: float = 9,
             max_slab_thickness: float = 18,
-            min_atoms = 20, 
+            min_atoms: int = 20, 
             max_atoms: int = 120,
-            vacuum: float = 12,
+            vacuum: float = 1,
             max_layers: int = 8,
+            **kwargs
             ) -> Atoms | None:
         """
         TEMP DOC
@@ -302,8 +321,8 @@ class OER_catalyst_study:
                 continue
 
             # Test if slabs are thick enough, if not, retry:
-            thicknesses = [self.compute_slab_thickness(slab) for slab in
-                            slabs]
+            thicknesses = [self._compute_slab_thickness(slab) for slab 
+                           in slabs]
             if np.min(thicknesses) < min_slab_thickness:
                 num_layers += 1
                 continue
@@ -326,14 +345,15 @@ class OER_catalyst_study:
             
             break
 
-# MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS <-------------------------------------
+        # <<<< --------------------------------------------------------- MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]
         slabs = [slab for slab in slabs if 
-                    self.compute_slab_thickness(slab)
+                    self._compute_slab_thickness(slab)
                     <= max_slab_thickness]
         
         # Select slab with closest O stoichiometry to bulk, if enabled:
         if select_closest_O_stoichiometry:
+            # 1. Find minimum O-stoichiometry difference:
             min_O_stoichiometry_diff = float('inf')
             for slab in slabs:
                 dict_1 = get_stoichiometry_dict(self.bulk_structure)
@@ -343,6 +363,7 @@ class OER_catalyst_study:
                 if O_diff < min_O_stoichiometry_diff:
                     min_O_stoichiometry_diff = O_diff
 
+            # 2. Select slabs with closest O-stoichiometry difference:
             selected_slabs = []
             for slab in slabs:
                 dict_1 = get_stoichiometry_dict(self.bulk_structure)
@@ -353,305 +374,218 @@ class OER_catalyst_study:
                     < 1/max_atoms:
                     selected_slabs.append(slab)
 
-            print(f"Selected {len(selected_slabs)} slabs out of ",
-                    f"{len(slabs)} based on closest O-stoichiometry.")
             slabs = selected_slabs              
 
         return slabs        
-# -------------------------------------------------------------------------------------------------------------------
-
 
     def identify_distinct_surfaces(self, max_miller = 1):
         self.max_miller = max_miller
         distinct_millers = get_symmetrically_distinct_miller_indices(
             self.bulk_structure, max_miller)
-        df = pd.DataFrame()
-        df['miller_indices'] = distinct_millers
         self.distinct_millers = distinct_millers
-        self.df_millers_ranking = df
-
+        if self.termination_ranking_df is None:
+            self.termination_ranking_df = pd.DataFrame(columns=[
+                "Miller indices", "Termination index", 'Score', 
+                'Normalized score'])
+        
     def predict_most_likely_surfaces(self, 
+        max_miller: int = 1,
         method: Literal['all', 'disregard-coord-of-O',
                          'O-coordination'] = 'all',
-        stoichiometry_tolerance: float = 0.1,
-        demand_stoichiometry_for_species: list[str] = [],
+        stoichiometry_tolerance: float = 0.2,
+        max_diff_dict: dict = {},
         ignore_stoichiometry_of_species: list[str] = [],
-        min_slab_size = 4, max_slab_size = 10, max_miller: int = 1
+        all_species_present: bool = True,
+        symmetrize: bool = True,
+        select_closest_O_stoichiometry: bool = True,
+        min_slab_thickness: float = 9,
+        max_slab_thickness: float = 18,
+        min_atoms: int = 20, 
+        max_atoms: int = 120,
+        vacuum: float = 1,
+        max_layers: int = 8,
         ) -> None:
         """
         TEMP-DOC
         """
 
-        # METHOD SOULD BE SAVED FOR FUTURE REFERENCE AND CHECKED/REFERENCE AGAINS THE APPLIED METHOD LATER <--------------------    
-        self.applied_ranking_method = method
+        # Build method dict for later reference:
+        new_ranking_method = {
+            'method': method,
+            'stoichiometry_tolerance': stoichiometry_tolerance,
+            'max_diff_dict': max_diff_dict,
+            'ignore_stoichiometry_of_species': 
+                ignore_stoichiometry_of_species,
+            'all_species_present': all_species_present,
+            'symmetrize': symmetrize,
+            'select_closest_O_stoichiometry': 
+                select_closest_O_stoichiometry,
+            'min_slab_thickness': min_slab_thickness,
+            'max_slab_thickness': max_slab_thickness,
+            'min_atoms': min_atoms,
+            'max_atoms': max_atoms,
+            'vacuum': vacuum,
+            'max_layers': max_layers,
+        }
+
+        if self.applied_ranking_method is not None: # <<< -------------- CONSIDER BUILDING CODE ALLOWING FOR THIS
+            raise RuntimeError("Surfaces have already been ranked. " \
+                "Re-ranking is not supported at this time.")
+
+        if max_miller < 1:
+            raise ValueError("max_miller must be at least 1.")
         
-        # Ensure bulk coordination numbers are set, if needed by method:
+        # <<< ---------------------------------------------------------- THIS CHECK DOES NOT WORK AS INTENDED
+        # if self.max_miller >= max_miller :
+        #     raise ValueError("ERROR: Surfaces have "
+        #         f"already been identified up to max_miller "
+        #         f"{self.max_miller}, which is >= the requested "
+        #         f"max_miller {max_miller}. Re-ranking is not supported."
+        #     )
+        
+        if self.max_miller is not None \
+            and self.max_miller != max_miller: # <<< ------------------- CONSIDER BUILDING CODE ALLOWING FOR THIS
+            raise RuntimeError("Current implementation does not support "
+                    "re-ranking with a different max_miller value.") 
+
+        # Ensure bulk coordination numbers are set:
         self._set_bulk_coordination(method)
         
-        # If distinct millers have not been identified yet, do it now:
+        # Ensure distinct miller-indices are identified:
         if self.distinct_millers is None:
             self.identify_distinct_surfaces(max_miller = max_miller)
-        elif self.max_miller != max_miller:
-            self.identify_distinct_surfaces(max_miller = max_miller)
-            print("OER-study-too-WARNING: max_miller changed from "
-                  f"{self.max_miller} to {max_miller}. ")
 
-        slabs_for_millers = {}
-        dev_slabs_for_millers = {}
+        termination_ranking_df = self.termination_ranking_df
         for miller_indices in self.distinct_millers:
-            slab_size = min_slab_size
-            while True:
-                sg = SlabGenerator(
-                    initial_structure = self.bulk_structure,
-                    miller_index = miller_indices,
-                    min_slab_size = slab_size,
-                    min_vacuum_size = 4,
-                    lll_reduce = True,
-                    in_unit_planes = True,
-                    center_slab = True,
-                    primitive = True,
-                )
-                slabs = sg.get_slabs(symmetrize = self.symmetrize_slabs)
-                if len(slabs) > 0 or slab_size >= max_slab_size:
-                    break
-                else:
-                    slab_size = max_slab_size
-                
-            slabs_for_millers[miller_indices] = slabs
-            dev_slabs_for_millers[miller_indices] = (sg, slabs)
 
-        # Saving, only for debugging purposes:
-        # self.slabs_for_millers = slabs_for_millers 
-        self.dev_slabs_for_millers = dev_slabs_for_millers
-            
-        # ---------------------------------------------------------------------------
-        # --- CODE USED BY PREVIOUS IMPLEMENTATION, TO BE DELETED IN THE FUTURE <--------------------
-        # self.slabs_for_millers = slabs_for_millers # ----------------- SEEMS TO BE UNUSED? REMOVE? <-------
-        # slabs_as_list_of_atoms = {
-        #     miller: [AseAtomsAdaptor.get_atoms(slab) for slab in slabs]
-        #     for miller, slabs in slabs_for_millers.items()
-        # }
-        # self.slabs_as_list_of_atoms = slabs_as_list_of_atoms
-
-        # bulk_coordination = self._determine_coordination_numbers(
-        #     self.bulk_atoms, method
-        # )
-        # mean_bulk_coordination = np.mean(bulk_coordination)
-
-        # scores = {}
-        # for miller, atoms_list in slabs_as_list_of_atoms.items():
-        #     score = None # Default score if no slabs pass the filters
-        #     if len(atoms_list) != 0:
-        #         # Computing the surface area of the slab cell:
-        #         cell = atoms_list[0].get_cell()
-        #         A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
-
-        #         for atoms in atoms_list:       
-        #             if stoichiometry == 'stoichiometric':
-        #                 if not self._compare_to_bulk_stoichiometry(
-        #                     atoms):
-        #                     continue
-        #             elif stoichiometry == 'O-stoichiometric':
-        #                 if not self._compare_to_bulk_stoichiometry(
-        #                     atoms,
-        #                     compare_O_only_stoichiometry = True
-        #                     ):
-        #                     continue
-                        
-        #             coordination_numbers = \
-        #             self._determine_coordination_numbers(atoms, method)
-                    
-        #             N_surface = len(coordination_numbers)
-        #             mean_slab_coordination = np.mean(
-        #                 coordination_numbers)
-
-        #             K = N_surface / A_surface / 2  # dividing by 2 to get per surface side
-        #             coordination_diff = K * (mean_slab_coordination 
-        #                                     - mean_bulk_coordination)
-                    
-        #             if (score is None) or (coordination_diff > score):
-        #                 score = coordination_diff
-                
-        #     scores[miller] = score
-        # ---------------------------------------------------------------------------
-
-        all_scores = {}
-        for miller, slabs in slabs_for_millers.items():
-            scores = None # Default score if no slabs pass the filters
-            if len(slabs) != 0:
-                
+            slabs = self._build_surfaces(miller_indices, 
+                                         **new_ranking_method)
+            if slabs is None:
+                N_ts = len(termination_ranking_df)
+                termination_ranking_df.loc[N_ts] = {
+                    "Miller indices": miller_indices,
+                    "Termination index": N_ts,
+                    "Score": float('nan'),
+                    "Normalized score": 0
+                }
+            else:                
                 for slab in slabs:       
                     atoms = AseAtomsAdaptor.get_atoms(slab)
 
-                    if stoichiometry == 'stoichiometric':
-                        if not self._compare_to_bulk_stoichiometry(
-                            atoms):
-                            continue
-                    elif stoichiometry == 'O-stoichiometric':
-                        if not self._compare_to_bulk_stoichiometry(
-                            atoms,
-                            compare_O_only_stoichiometry = True
-                            ):
-                            continue
+                    # Calculate the surface area:
+                    slab_normal = slab.normal
                     cell = atoms.get_cell()
+                    a_1 = cell[0]
+                    a_2 = cell[1]
+                    tol = 1e-5
+                    if np.abs(np.dot(slab_normal, a_1)) > tol or \
+                          np.abs(np.dot(slab_normal, a_2)) > tol:
+                        raise RuntimeError("Failed to vectors in plane " \
+                                           "of the surface.")
                     A_surface = np.linalg.norm(np.cross(cell[0], 
                                                         cell[1]))
                     
                     # Determine indices of the top half of atoms in the 
                     # surface:
                     top_half_indices = \
-                        self.get_top_half_atom_projections(
+                        self._get_top_half_atom_projections(
                             atoms, slab.normal)
 
+                    # Get the corresponding bulk coordination numbers
+                    # for the atoms in the top half of the slab (i.e.,
+                    # what the cordination numbers would have been in 
+                    # the bulk):
                     corresponding_bulk_coords = np.array( \
                         slab.site_properties.get('bulk-custom-coord'))
                     corresponding_bulk_coords = \
                         corresponding_bulk_coords[top_half_indices]
-                    
-                    # Consider positive values. Negative values are set
-                    # indicate that the site (atom) should be ignored:
-                    N_non_zero = np.count_nonzero(
-                        corresponding_bulk_coords > -0.5)
-                    # SHOULD THIS BE USED (N_non_zero) ?? <<<--------------------------------------------------------------------------
-                    
+
                     # Get coordination numbers for top half of slab:
-                    coordination_numbers = np.array( \
+                    coords_numbers = np.array( \
                     self._determine_coordination_numbers(
                         atoms, method))[top_half_indices]
                 
-                    corrd_diff = np.sum(coordination_numbers - 
+                    corrd_diff = np.sum(coords_numbers - 
                                         corresponding_bulk_coords)
                     
-                    # Norm the corrd difference:
-                    corrd_diff = corrd_diff/A_surface
-                    
-                    if scores is None:
-                        scores = []
-                    scores.append(float(corrd_diff))
+                    # Score, euqal to coordination difference per area:
+                    score = corrd_diff/A_surface
 
-                all_scores[miller] = scores
+                    N_ts = len(termination_ranking_df)
+                    termination_ranking_df.loc[N_ts] = {
+                        "Miller indices": miller_indices,
+                        "Termination index": N_ts,
+                        "Score": score,
+                        "Normalized score": 0
+                    }
+                    self.terminations[N_ts] = slab
+    
+        self.termination_ranking_df = termination_ranking_df
+        self.applied_ranking_method = method
 
-        self.add_scores_to_df(all_scores)
+    def normalize_termination_scores(self) -> None:
 
-    def add_scores_to_df(self, all_scores):
-        df = self.df_millers_ranking
-        df['Scores'] = None
-        df['Scores'] = df['Scores'].astype(object)
-        # Adding raw scores to df:
-        max_scores = []
+        df = self.termination_ranking_df
+        scores = df['Score']
 
-        for miller, scores in all_scores.items():
-            # Find the matching index
-            idx_list = df.index[df['miller_indices'] == miller].tolist()
-            if not idx_list:
-                continue
-            idx = idx_list[0]
+        min_score = scores.min(skipna=True)
+        max_score = scores.max(skipna=True)
 
-            # Store the array in the cell
-            df.at[idx, 'Scores'] = scores           # treat scores as a single object
-            df.at[idx, 'Max Score'] = np.max(scores) # numeric is fine
+        if pd.isna(min_score) or pd.isna(max_score):
+            df['Normalized score'] = float('nan')
+        elif np.isclose(max_score, min_score):
+            # all non-NaN values are identical
+            df['Normalized score'] = 1.0
+        else:
+            df['Normalized score'] = np.round(
+                (scores - min_score) / (max_score - min_score), 6)
+            
+        for i, row in df.iterrows():
+            if pd.isna(row['Score']):
+                df.at[i, 'Normalized score'] = 0.0
+
+        self.termination_ranking_df = df
+
+
+    def get_termination_rankings(self, normalize_scores = True
+                                     ) -> pd.DataFrame:
+        if normalize_scores:
+            self.normalize_termination_scores()
+        return self.termination_ranking_df.copy()
         
-        df['Max Score'] = pd.to_numeric(df['Max Score'], 
-                                        errors='coerce')
-        # adding normalized scores to df:
-        try:
-            scores_values = df['Max Score'].values
-            min_score = np.nanmin(scores_values)
-            max_score = np.nanmax(scores_values)
-            normalized_scores = (scores_values - min_score)
-            normalized_scores /= (max_score - min_score)
-            df['Normalized Score'] = normalized_scores
-        except:
-            df['Normalized Score'] = float('nan')
-        self.df_millers_ranking = df
-
-    def get_df_with_surface_rankings(self) -> pd.DataFrame:
-        return self.df_millers_ranking.copy()
-        
-
-    def initialize_OER_surface_studies(self, miller_indices: 
-            tuple[int, int, int], 
-            stoichiometric = False,
-            min_slab_thickness: float = 8,
-            max_slab_thickness: float = 14,
-            min_atoms = 20, max_atoms: int = 100,
-            fixed_bottom_half: bool = True, vacuum = 8,
+    def initialize_oer_surface_study(self, 
+            termination_index: int,
+            miller_indices: tuple[int, int, int] | None = None, 
+            fixed_bottom_half: bool = True, 
+            vacuum = 12,
             force = False) -> None:
         
-        if miller_indices in self.OER_surface_studies and not force:
-            raise ValueError("OER surface studies for the given "
-        "miller indices already exist. Use force=True to overwrite.")
+        if termination_index in self.oer_surface_studies and not force:
+            raise ValueError("An OER_surface_study has already been "\
+                "initialized for the provided termination_index. "\
+                "Use force=True to overwrite the existing study."
+                "!!! DOING THIS IS HIGHLY DISCOURAGED !!!")
+
+        # Doing sanity check if miller indices are provided:
+        if miller_indices is not None:
+            df = self.termination_ranking_df
+            millers_terminations_indecies = df[df['Miller indices'] ==
+                        miller_indices]['Termination index'].values
+            if termination_index not in millers_terminations_indecies:
+                raise ValueError("The provided termination_index does " \
+                "not correspond to the provided miller_indices.")
+            
+        slab = self.terminations[termination_index]
+        oer_surface_study = OER_surface_study(self, slab,
+                fixed_bottom_half = fixed_bottom_half, vacuum = vacuum)
         
-        accepted_slabs = []
-        normal_vectors = []
-        stop_flag = False
-        slab_thickness = min_slab_thickness
-        while True:
-            sg = SlabGenerator(
-            initial_structure = self.bulk_structure,
-            miller_index = miller_indices,
-            min_slab_size = slab_thickness,
-            min_vacuum_size = 2,
-            lll_reduce = True,
-            in_unit_planes = False,
-            center_slab = True,
-            primitive = True,
-            )
-            slabs = sg.get_slabs(symmetrize = self.symmetrize_slabs)
-            
-            if len(slabs) > 0:
-                
-                for slab in slabs:
-                    normal = slab.normal
-                    atoms = AseAtomsAdaptor.get_atoms(slab)
-                    if len(atoms) < min_atoms:
-                        continue
-                    if len(atoms) > max_atoms:
-                        stop_flag = True
-                        continue
-                    if stoichiometric:
-                        if not self._compare_to_bulk_stoichiometry(
-                                                                atoms):
-                            continue
-
-                    compute_slab_thickness = self.compute_slab_thickness(
-                        slab)
-                    if slab_thickness <= min_slab_thickness:
-                        continue
-                    if slab_thickness > max_slab_thickness:
-                        stop_flag = True
-                        continue
-
-                    accepted_slabs.append(atoms)
-                    normal_vectors.append(normal)
-                
-                if len(accepted_slabs) > 0:
-                    stop_flag = True
-
-            elif slab_thickness >= max_slab_thickness:
-                return None
-            
-            if len(accepted_slabs) == 0:
-                slab_thickness += 1
-
-            if stop_flag:
-                break
-
-        oer_surface_studies = []
-        for atoms, normal in zip(accepted_slabs, normal_vectors):
-            oer_surface_study = OER_surface_study(self, atoms, normal, 
-                                                  fixed_bottom_half, 
-                                                  vacuum)
-            oer_surface_studies.append(oer_surface_study)
-
-        oer_surface_studies = tuple(oer_surface_studies)
-        self.OER_surface_studies[miller_indices] = oer_surface_studies
+        self.oer_surface_studies[termination_index] = oer_surface_study
 
     def get_surface_studies(self
-            ) -> dict[tuple[int, int, int], tuple[OER_surface_study]]:
-        return self.OER_surface_studies
-
-    def get_atom_projections_on_normal(self, input: Atoms | Slab,
+            ) -> dict[int, OER_surface_study]:
+        return self.oer_surface_studies
+    
+    def _get_atom_projections_on_normal(self, input: Atoms | Slab,
                                normal_vector: np.ndarray | None = None
                                ) -> float:
         
@@ -661,21 +595,20 @@ class OER_catalyst_study:
         pos = atoms.get_positions()
         return np.dot(pos, normal_vector)
 
-    def compute_slab_thickness(self, input: Atoms | Slab, 
+    def _compute_slab_thickness(self, input: Atoms | Slab, 
                                normal_vector: np.ndarray | None = None
                                ) -> float:
-        projections = self.get_atom_projections_on_normal(
+        projections = self._get_atom_projections_on_normal(
             input, normal_vector)
     
         slab_thickness = projections.max() - projections.min()
         return slab_thickness
-    
 
-    def get_top_half_atom_projections(self, input: Atoms | Slab,
+    def _get_top_half_atom_projections(self, input: Atoms | Slab,
             normal_vector: np.ndarray | None = None,
             ) -> np.ndarray:
         
-        projections = self.get_atom_projections_on_normal(
+        projections = self._get_atom_projections_on_normal(
             input, normal_vector)
         
         median_projection = np.median(projections)

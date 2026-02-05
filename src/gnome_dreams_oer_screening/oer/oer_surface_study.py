@@ -8,8 +8,8 @@ from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab
 
-from oer.OER_study_utils import get_atoms_and_normal_from_input
-from oer.OER_adsorption_site_study import OER_adsorption_site_study
+from gnome_dreams_oer_screening.oer.oer_study_utils import get_atoms_and_normal_from_input
+from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import OER_adsorption_site_study
 
 class OER_surface_study:
     """
@@ -58,7 +58,7 @@ class OER_surface_study:
                  OER_catalyst_study,
                  input_surface: Atoms | Slab,
                  normal_vector: np.ndarray | None = None,
-                 fixed_bottom_half: bool = True, vacuum: float = 8
+                 fixed_bottom_half: bool = True, vacuum: float = 12
                  ):
     
         # Make sure that the surfaces is on the form of an ASE Atoms 
@@ -133,6 +133,11 @@ class OER_surface_study:
     
     def _determine_adsorption_sites(self, surface: Atoms,
                                     top_layer_tol: float = 1.5):
+        
+
+# THERE NEEDS TO BE IMPLIMENTED A MOR SOFISTICATED WAY OF DETERMINING ADSORPTION SITES !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# This could for instance invlove using neighbor lists to find close naiboring atoms etc.
+
 
         # Determining top metal (non-O) layer:
         metal_indices = [i for i, atom in enumerate(surface) 

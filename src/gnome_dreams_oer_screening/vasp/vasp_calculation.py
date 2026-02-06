@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 import numpy as np
-from langchain.agents import tool
 
 from ase import Atoms
 from ase.io import read, Trajectory
@@ -28,9 +27,9 @@ from custodian.vasp.handlers import (
     DriftErrorHandler, # only relaxation handler
     WalltimeHandler
 )
-from pyparsing import Literal
+from typing import Literal
 
-from gnome_dreams_oer.vasp.pre_defined_vasp_sets import (
+from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
     RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet
 )
 
@@ -232,7 +231,7 @@ class calculational_setup():
             atoms[0].charge = fake_energy  # just to store energy
             save_fake_results_to_traj(directory, atoms)
 
-class job_submitter():
+class Job_submitter():
     def __init__(self, explog, 
         mode: Literal["test", "production_test", "production"]
           = "production"):
@@ -240,7 +239,6 @@ class job_submitter():
         self.mode = mode
         self.calc_setup = calculational_setup(mode=mode)
 
-    @tool
     def submit_vasp_calculation(
         self,
         candidate_id, # <------- DO WE KNOW WHAT TYPE THIS IS?
@@ -283,7 +281,7 @@ class job_submitter():
             # Need to sumbmit job...
 
         if calculation_type == "surface":
-
+            pass
             # Test 
 
 

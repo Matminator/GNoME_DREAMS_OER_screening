@@ -1,13 +1,16 @@
 
 import os
 from pathlib import Path
-
+from time import time
 import numpy as np
+from typing import Literal
 
 from ase import Atoms
 from ase.io import read, Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
+
+from executorlib import SlurmClusterExecutor
 
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
@@ -27,11 +30,12 @@ from custodian.vasp.handlers import (
     DriftErrorHandler, # only relaxation handler
     WalltimeHandler
 )
-from typing import Literal
+
 
 from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
-    RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet
-)
+    RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet)
+
+from gnome_dreams_oer_screening import RelationalFrame, read_template
 
 def run_vasp_via_custodian(
                 directory, 
@@ -129,6 +133,9 @@ def clean_up_vasp_directory(
         except Exception as e:
             print(f"Could not remove {file}: {e}")
 
+def exlib_run_slurm_test(**kwargs):
+    time.sleep(8*60)
+
 def exlib_run_vasp(
     directory, 
     return_vasp_out = True,
@@ -187,6 +194,7 @@ def save_fake_results_to_traj(directory: Path, atoms: Atoms):
     out_traj = Trajectory(directory / "fake_result.traj", "w")
     out_traj.write(atoms)
     out_traj.close()
+    
 
 class calculational_setup():
 
@@ -202,6 +210,9 @@ class calculational_setup():
         if mode == 'production_test':
             self.bulk_set = TestRelaxSet
             self.surface_set = TestRelaxSet
+        else:
+            self.bulk_set = bulk_set
+            self.surface_set = surface_set
 
     def bulk_relaxation(self, structure: Structure, directory: Path
                         ) -> None:
@@ -231,64 +242,160 @@ class calculational_setup():
             atoms[0].charge = fake_energy  # just to store energy
             save_fake_results_to_traj(directory, atoms)
 
+
 class Job_submitter():
-    def __init__(self, explog, 
-        mode: Literal["test", "production_test", "production"]
-          = "production"):
+
+    def __init__(self, 
+        explog: RelationalFrame, 
+        exlib_cache_dir: Path,
+        vasp_calculation_dir: Path,
+        mode: Literal["test", "slurm_test", "production_test", 
+                      "production"] = "production",
+        overwrite_existing_vasp_dirs: bool = False
+        ) -> None:
+
+        if vasp_calculation_dir.exists():
+            if not overwrite_existing_vasp_dirs:
+                raise FileExistsError(f"The specified VASP" \
+                    f" calculation root directory " \
+                    f"{vasp_calculation_dir} already exists. " \
+                    f"To overwrite, set " \
+                    f"overwrite_existing_vasp_dirs=True.")
+        else:
+            vasp_calculation_dir.mkdir(parents=True, exist_ok=True)
+
+        self.vasp_dir = vasp_calculation_dir
+        self.exlib_cache_dir = exlib_cache_dir
         self.explog = explog
         self.mode = mode
         self.calc_setup = calculational_setup(mode=mode)
 
-    def submit_vasp_calculation(
+
+    def enter_in_log(
         self,
         candidate_id, # <------- DO WE KNOW WHAT TYPE THIS IS?
         calculation_type: Literal["bulk_relaxation", 
             "surface_relaxation", "O_adsorption", 'OH_adsorption'],
-        directory: str,
-        custodian_handlers: list = [VaspErrorHandler(),
-        MeshSymmetryErrorHandler(), NonConvergingErrorHandler(),
-        UnconvergedErrorHandler(), FrozenJobErrorHandler(), StdErrHandler(),
-        # LargeSigmaHandler(), IncorrectSmearingHandler(),
-        PositiveEnergyErrorHandler()
-                                    ],
-        vasp_cmd: list = ["mpiexec", "vasp_std"],
-        max_errors: int = 20
-        ) -> dict:
+        note: str | None = None
+        ) -> None:
 
+        new_process_row = {"job_type": calculation_type, 
+                       "candidate_id": candidate_id,
+                       "status": "un-submitted"
+        }
+        if note is not None:
+            new_process_row["processNote"] = note
 
         # Get the candidate row from the ExpLog:
-        cand_row = self.explog.candidates_df[candidate_id]
-        processes_df = self.explog.candidates[candidate_id].processes.df
-        study = cand_row["study_obj"]
+        cand_row = self.explog.candidates[candidate_id]
 
-        if calculation_type == "bulk":
+        processes = cand_row.processes
 
-            # Test if there are any non-bulk processes:
-            if not (processes_df['job_type'] ==
-                     'bulk_relaxation').all():
-                message = "ERROR: Non-bulk relaxation jobs has" \
-                " already been submitted for this candidate:" \
-                f" {candidate_id}. As surface and adsorption " \
-                "calculations already has been made, no bulk " \
-                "calculations should be submitted as this would " \
-                "invalidate these calculations."
-                return message
+        # Sanetity checks before entering the calculation in the log:
+        p_df = processes.df
+        p_N = len(p_df)
+        new_process_row['process_id'] = p_N
+        if p_N > 0 and calculation_type == "bulk_relaxation":
+            sub_df = p_df[(p_df['job_type'] == calculation_type) & 
+                             (p_df['status'] == 'completed')]
+            if len(sub_df) > 0:
+                raise RuntimeError(f"Bulk relaxation calculation has " \
+                f"already been completed for candidate {candidate_id}.")
+        
+        new_process_row['VASP_dir'] = str(self.vasp_dir / 
+            f"{candidate_id}_{calculation_type}_"\
+                f"{new_process_row['process_id']}")
+                
+        self.explog.processes.add_row(new_process_row, 
+                                      allow_update=True)
 
+
+    def submit_vasp_calculation(
+        self,
+        candidate_id,
+        process_id,
+        resource: Literal['xeon56', 'xeon40el8', 'xeon24el8', # <<< ---- CAN SPECIFY FURTHER LATER
+                           'auto'],
+        custodian_handlers: list = [VaspErrorHandler(),
+        MeshSymmetryErrorHandler(), NonConvergingErrorHandler(),
+        UnconvergedErrorHandler(), FrozenJobErrorHandler(),
+        StdErrHandler(), PositiveEnergyErrorHandler()
+        # LargeSigmaHandler(), IncorrectSmearingHandler(), 
+        ],
+        vasp_cmd: list = ["mpiexec", "vasp_std"],
+        max_errors: int = 20
+        ) -> None:
+
+        study = self.explog.candidates[candidate_id].df["study_obj"].values[0]
+        print(study)
+        
+        process_row = self.explog.processes.df.loc[
+            (self.explog.processes.df['candidate_id'] == candidate_id) &
+            (self.explog.processes.df['process_id'] == process_id)
+        ]
+
+        print(process_row['job_type'].values[0])
+
+        if process_row['status'].values[0] != 'un-submitted':
+            raise RuntimeError(f"Process {process_id}, is not an " \
+                f"un-submitted process and cannot be submitted.")
+        
+        calc_dir = Path(process_row['VASP_dir'].values[0])
+
+        if process_row['job_type'].values[0] == 'bulk_relaxation':
             init_structure = study.get_init_structure()
+            self.calc_setup.bulk_relaxation(
+                structure = init_structure, directory = calc_dir
+            )
 
-            self.calc_setup.bulk_relaxation(init_structure, directory)
+        elif process_row['job_type'].values[0] in \
+            ["surface_relaxation", "O_adsorption", 'OH_adsorption']:
 
-            # Need to sumbmit job...
+            raise NotImplementedError(f"Calculation type "\
+                f"{process_row['job_type'].values[0]} not " \
+                    f"implemented yet.")
+        
+            self.calc_setup.surface_relaxation(
+                structure = init_structure, directory = calc_dir
+            )
+        
 
-        if calculation_type == "surface":
-            pass
-            # Test 
+        if self.mode == 'slurm_test':
+            slurm_template = read_template('test')
 
+        elif self.mode in ['production_test', 'production']:
+            if resource == 'auto':
+                # Placeholder for auto resource selection logic:
+                slurm_template = read_template('xeon40el8')
+            else:
+                slurm_template = read_template(resource)
 
+        if self.mode != 'test':
 
+            if self.mode == 'slurm_test':
+                job_type = exlib_run_slurm_test
+            else:   
+                job_type = exlib_run_vasp
 
+            with SlurmClusterExecutor(
+                cache_directory=self.exlib_cache_dir) as exe:
+                job = exe.submit( # <------------------------------------- MAY BE EASIER TO USE F LATER????
+                        job_type,
+                        calc_dir.resolve(),
+                        resource_dict={
+                            "submission_template": slurm_template,
+                        },
+                    )
+                
+                job_id = job.job_id
+                self.explog.candidates[candidate_id].processes[process_id].slurmID = job_id
 
+        self.explog.candidates[candidate_id].processes[process_id].status = 'submitted'
+        
+    def update_log(self) -> None:
+        self.explog.processes
 
+    
 
 """
 NOTE FOR FUTURE:
@@ -310,5 +417,56 @@ Determine electronic type:
        |
        v
 Relaxation calculation (NSW>0)
+
+"""
+
+
+
+
+"""
+TEMP....
+
+
+# --- Setup of VASP directories ---
+vasp_calc_main_dir = Path("VASP_calculations/test_run_" + run_id)
+calc_paths = [vasp_calc_main_dir / f"calc_{i}" for i in range(5)]
+
+for path in calc_paths:
+    vasp_set = RPBE_relax_bulk_set(test_structure)
+    vasp_set.write_input(output_dir = path) 
+
+# --- Cache location (for executorlib) ---
+
+
+slurm_template = Path("slurm_templates/test_template.sh").read_text()
+
+# --- Submit job ---
+print("--- Submitting job to Slurm cluster... ---", flush=True)
+with SlurmClusterExecutor(cache_directory=cache_dir) as exe:
+    futures = []
+
+    for i, calc_path in enumerate(calc_paths):
+        f = exe.submit(
+            exlib_run_vasp,
+            calc_path.resolve(),
+            resource_dict={
+                "submission_template": slurm_template,
+            },
+        )
+        futures.append(f)
+        print(f"Submitted job {i}, future: {f}", flush=True)
+    print("--- All jobs submitted ---", flush=True)
+
+    results = [f.result() for f in futures]
+    print("Results:", results)
+
+
+
+
+for result in results:
+    print("VASP run result:", result['E'])
+
+
+
 
 """

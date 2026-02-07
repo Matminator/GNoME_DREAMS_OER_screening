@@ -270,7 +270,6 @@ class Job_submitter():
         self.mode = mode
         self.calc_setup = calculational_setup(mode=mode)
 
-
     def enter_in_log(
         self,
         candidate_id, # <------- DO WE KNOW WHAT TYPE THIS IS?
@@ -366,9 +365,23 @@ class Job_submitter():
         elif self.mode in ['production_test', 'production']:
             if resource == 'auto':
                 # Placeholder for auto resource selection logic:
-                slurm_template = read_template('xeon40el8')
+                # slurm_template = read_template('xeon40el8')
+                slurm_template = {
+                    "job_name": "vasp_job",
+                    "cores_max": 24,
+                    "nodes_max": 1,
+                    "memory_max": 2000,
+                    "partition": "venkvis-cpu",
+                }
             else:
-                slurm_template = read_template(resource)
+                # slurm_template = read_template(resource)
+                slurm_template = {
+                    "job_name": "vasp_job",
+                    "cores_max": 48,
+                    "nodes_max": 1,
+                    "memory_max": 2000,
+                    "partition": "venkvis-asdfasdfpu",
+                }
 
         if self.mode != 'test':
 
@@ -377,18 +390,27 @@ class Job_submitter():
             else:   
                 job_type = exlib_run_vasp
 
-            with SlurmClusterExecutor(
-                cache_directory=self.exlib_cache_dir) as exe:
-                job = exe.submit( # <------------------------------------- MAY BE EASIER TO USE F LATER????
-                        job_type,
-                        calc_dir.resolve(),
-                        resource_dict={
-                            "submission_template": slurm_template,
-                        },
-                    )
+            # with SlurmClusterExecutor(
+            #     cache_directory=self.exlib_cache_dir) as exe:
+            #     job = exe.submit( # <------------------------------------- MAY BE EASIER TO USE F LATER????
+            #             job_type,
+            #             calc_dir.resolve(),
+            #             resource_dict={
+            #                 "submission_template": slurm_template,
+            #             },
+            #         )
                 
-                job_id = job.job_id
-                self.explog.candidates[candidate_id].processes[process_id].slurmID = job_id
+            #     job_id = job.job_id
+            #     self.explog.candidates[candidate_id].processes[process_id].slurmID = job_id
+                
+            job_id_tmp = self.qa.submit(
+                node_max = slurm_template["nodes_max"],
+                core_max = slurm_template["cores_max"],
+                memory_max = slurm_template["memory_max"],
+                command = f"python {job_type} {calc_dir.resolve()}",
+            )
+            self.explog 
+            
 
         self.explog.candidates[candidate_id].processes[process_id].status = 'submitted'
         

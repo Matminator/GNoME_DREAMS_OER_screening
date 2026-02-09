@@ -4,7 +4,7 @@ from pathlib import Path
 from pysqa import QueueAdapter
 
 from .relational_frame import RelationalFrame
-from gnome_dreams_oer_screening.vasp.job_submitter import Job_submitter
+from gnome_dreams_oer_screening.vasp.Job_handler import Job_handler
 
 
 class Explog:
@@ -42,7 +42,7 @@ slurm: {
         self.qa = QueueAdapter()
         self.queue_adapter = queue_adapter
         self.relational_frame = RelationalFrame()
-        self.submitter = Job_submitter(self.queue_adapter, self.relational_frame)
+        self.submitter = Job_handler(self.queue_adapter, self.relational_frame)
 
     def process_message(self, message):
         # Process the message and update the relational frame

@@ -22,7 +22,7 @@ from gnome_dreams_oer_screening.vasp.vasp_calculation import (
     run_vasp_via_custodian, calculational_setup)
 from gnome_dreams_oer_screening.explog.relational_frame import RelationalFrame
 
-class Job_submitter():
+class Job_handler():
 
     def __init__(self, 
         explog: RelationalFrame, 
@@ -87,7 +87,6 @@ class Job_submitter():
                 
         self.explog.processes.add_row(new_process_row, 
                                       allow_update=True)
-
 
     def submit_vasp_calculation(
         self,
@@ -181,7 +180,6 @@ class Job_submitter():
                 command = f"python {job_type} {calc_dir.resolve()}",
             )
             self.explog 
-            
 
         self.explog.candidates[candidate_id].processes[process_id].status = 'submitted'
         

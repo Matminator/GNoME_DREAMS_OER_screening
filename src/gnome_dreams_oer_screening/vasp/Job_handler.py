@@ -84,26 +84,18 @@ class queue_factory():
 class Job_handler():
 
     def __init__(self, 
-        explog: RelationalFrame, 
-        exlib_cache_dir: Path,
+        explog: RelationalFrame,
         vasp_calculation_dir: Path,
         mode: Literal["test", "slurm_test", "production_test", 
                       "production"] = "production",
         overwrite_existing_vasp_dirs: bool = False
         ) -> None:
 
-        if vasp_calculation_dir.exists():
-            if not overwrite_existing_vasp_dirs:
-                raise FileExistsError(f"The specified VASP" \
-                    f" calculation root directory " \
-                    f"{vasp_calculation_dir} already exists. " \
-                    f"To overwrite, set " \
-                    f"overwrite_existing_vasp_dirs=True.")
-        else:
-            vasp_calculation_dir.mkdir(parents=True, exist_ok=True)
+        # Create the directory if it doesn't exist
+        if not vasp_calculation_dir.exists():
+            vasp_calculation_dir.mkdir(parents=True)
 
         self.vasp_dir = vasp_calculation_dir
-        self.exlib_cache_dir = exlib_cache_dir
         self.explog = explog
         self.mode = mode
         self.queue_factory = queue_factory(mode=mode)
@@ -165,10 +157,6 @@ class Job_handler():
         ) -> None:
 
         study = self.explog.candidates[candidate_id].df["study_obj"].values[0]
-        
-        if self.mode != 'test':
-            raise NotImplementedError("Only test mode is implemented " \
-            "currently.")
         
         process_row = self.explog.processes.df.loc[
             (self.explog.processes.df['candidate_id'] == candidate_id) &

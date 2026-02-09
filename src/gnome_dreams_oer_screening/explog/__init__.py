@@ -1,1 +1,1 @@
-from .explog import RelationalFrame
+from .relationalFrame import RelationalFrame

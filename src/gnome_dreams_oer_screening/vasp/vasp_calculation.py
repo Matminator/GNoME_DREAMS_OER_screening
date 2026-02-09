@@ -278,6 +278,8 @@ class Job_submitter():
         note: str | None = None
         ) -> None:
 
+        N_candidates = len(self.explog.candidates.df)
+
         new_process_row = {"job_type": calculation_type, 
                        "candidate_id": candidate_id,
                        "status": "un-submitted"
@@ -287,13 +289,12 @@ class Job_submitter():
 
         # Get the candidate row from the ExpLog:
         cand_row = self.explog.candidates[candidate_id]
-
-        processes = cand_row.processes
+        cand_processes = cand_row.processes
 
         # Sanetity checks before entering the calculation in the log:
-        p_df = processes.df
+        p_df = cand_processes.df
         p_N = len(p_df)
-        new_process_row['process_id'] = p_N
+        new_process_row['process_id'] = str(N_candidates) + str(p_N)
         if p_N > 0 and calculation_type == "bulk_relaxation":
             sub_df = p_df[(p_df['job_type'] == calculation_type) & 
                              (p_df['status'] == 'completed')]
@@ -326,14 +327,18 @@ class Job_submitter():
         ) -> None:
 
         study = self.explog.candidates[candidate_id].df["study_obj"].values[0]
-        print(study)
+        
+        if self.mode != 'test':
+            raise NotImplementedError("Only test mode is implemented " \
+            "currently.")
         
         process_row = self.explog.processes.df.loc[
             (self.explog.processes.df['candidate_id'] == candidate_id) &
             (self.explog.processes.df['process_id'] == process_id)
         ]
-
-        print(process_row['job_type'].values[0])
+        if len(process_row) == 0:
+            raise ValueError(f"No process found for candidate_id "
+                        f"{candidate_id} and process_id {process_id}.")
 
         if process_row['status'].values[0] != 'un-submitted':
             raise RuntimeError(f"Process {process_id}, is not an " \
@@ -390,19 +395,6 @@ class Job_submitter():
             else:   
                 job_type = exlib_run_vasp
 
-            # with SlurmClusterExecutor(
-            #     cache_directory=self.exlib_cache_dir) as exe:
-            #     job = exe.submit( # <------------------------------------- MAY BE EASIER TO USE F LATER????
-            #             job_type,
-            #             calc_dir.resolve(),
-            #             resource_dict={
-            #                 "submission_template": slurm_template,
-            #             },
-            #         )
-                
-            #     job_id = job.job_id
-            #     self.explog.candidates[candidate_id].processes[process_id].slurmID = job_id
-                
             job_id_tmp = self.qa.submit(
                 node_max = slurm_template["nodes_max"],
                 core_max = slurm_template["cores_max"],
@@ -415,7 +407,7 @@ class Job_submitter():
         self.explog.candidates[candidate_id].processes[process_id].status = 'submitted'
         
     def update_log(self) -> None:
-        self.explog.processes
+        return self.explog.processes
 
     
 
@@ -439,56 +431,5 @@ Determine electronic type:
        |
        v
 Relaxation calculation (NSW>0)
-
-"""
-
-
-
-
-"""
-TEMP....
-
-
-# --- Setup of VASP directories ---
-vasp_calc_main_dir = Path("VASP_calculations/test_run_" + run_id)
-calc_paths = [vasp_calc_main_dir / f"calc_{i}" for i in range(5)]
-
-for path in calc_paths:
-    vasp_set = RPBE_relax_bulk_set(test_structure)
-    vasp_set.write_input(output_dir = path) 
-
-# --- Cache location (for executorlib) ---
-
-
-slurm_template = Path("slurm_templates/test_template.sh").read_text()
-
-# --- Submit job ---
-print("--- Submitting job to Slurm cluster... ---", flush=True)
-with SlurmClusterExecutor(cache_directory=cache_dir) as exe:
-    futures = []
-
-    for i, calc_path in enumerate(calc_paths):
-        f = exe.submit(
-            exlib_run_vasp,
-            calc_path.resolve(),
-            resource_dict={
-                "submission_template": slurm_template,
-            },
-        )
-        futures.append(f)
-        print(f"Submitted job {i}, future: {f}", flush=True)
-    print("--- All jobs submitted ---", flush=True)
-
-    results = [f.result() for f in futures]
-    print("Results:", results)
-
-
-
-
-for result in results:
-    print("VASP run result:", result['E'])
-
-
-
 
 """

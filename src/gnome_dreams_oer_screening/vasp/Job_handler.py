@@ -22,6 +22,65 @@ from gnome_dreams_oer_screening.vasp.vasp_calculation import (
     run_vasp_via_custodian, calculational_setup)
 from gnome_dreams_oer_screening.explog.relational_frame import RelationalFrame
 
+from pysqa import QueueAdapter
+
+
+class queue_factory():
+    def __init__(self, mode: Literal["test", "slurm_test",
+                        "production_test", "production"] ):
+        self.mode = mode
+        self.partition_configs = {
+            "xeon24el8_test": {
+                "nodes": 1,
+                "cores": 1,
+                "run_time_max": "00:10:00",
+                "mail-type": "NONE"
+            },
+            "xeon24el8": {
+                "nodes": 1,
+                "cores": 24,
+                "run_time_max": "50:00:00",
+                "mail-type": "NONE"
+            },
+            "xeon40el8": {
+                "nodes": 1,
+                "cores": 40,
+                "run_time_max": "50:00:00",
+                "mail-type": "NONE"
+            },
+            "xeon56": {
+                "nodes": 1,
+                "cores": 56,
+                "run_time_max": "50:00:00",
+                "mail-type": "NONE"
+            },
+        }
+
+    def create_queue(self, partition: Literal["xeon24el8", "xeon40el8", 
+                                "xeon56","auto"]) -> QueueAdapter:
+        
+        if self.mode in ["test", "slurm_test"]:
+            partition = "xeon24el8_test"
+        else:
+            if partition == "auto":
+                # Placeholder for auto resource selection logic: <<< --- CAN SPECIFY FURTHER LATER
+                partition = "xeon40el8"
+
+        if partition not in self.partition_configs:
+            raise ValueError(f"Unknown partition: {partition}")
+        
+        config = self.partition_configs[partition]
+
+        return QueueAdapter(
+            scheduler_type="slurm",
+            job_name="A_vasp_job",
+            queue_name=partition,
+            # stderr="./slabord.err",      # corresponds to -e
+            # stdout="./slabord.out",      # corresponds to -o
+            **config
+            )
+    
+
 class Job_handler():
 
     def __init__(self, 
@@ -47,6 +106,7 @@ class Job_handler():
         self.exlib_cache_dir = exlib_cache_dir
         self.explog = explog
         self.mode = mode
+        self.queue_factory = queue_factory(mode=mode)
         self.calc_setup = calculational_setup(mode=mode)
 
     def enter_in_log(

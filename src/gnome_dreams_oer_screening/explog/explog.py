@@ -1,6 +1,11 @@
-from relationalFrame import RelationalFrame
+import os
+from typing import Literal
+from pathlib import Path
 from pysqa import QueueAdapter
-from vasp_calculation import Job_submitter
+
+from .relational_frame import RelationalFrame
+from gnome_dreams_oer_screening.vasp.job_submitter import Job_submitter
+
 
 class Explog:
     def __init__(self, queue_adapter: QueueAdapter):

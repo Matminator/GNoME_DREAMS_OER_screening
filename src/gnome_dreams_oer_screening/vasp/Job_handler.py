@@ -182,6 +182,8 @@ class Job_handler():
                 
         self.rframe.processes.add_row(new_process_row, 
                                       allow_update=True)
+        
+        return str(p_N)
 
     def submit_vasp_calculation(
         self,

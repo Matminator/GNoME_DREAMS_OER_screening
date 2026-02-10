@@ -69,7 +69,7 @@ class Explog:
         site_index: int | None = None,
         note: str | None = None
         ) -> None:
-        self.job_handler.enter_process(candidate_id, 
+        return self.job_handler.enter_process(candidate_id, 
             calculation_type, termination_index, site_index, note)
         
     def submit_process(self, candidate_id: str, process_id: str,
@@ -80,6 +80,8 @@ class Explog:
         
     def update_log(self):
         self.job_handler.update_log()
+
+        #  SOULD RETURN A DICT, WITH ALL UPDATES... <<<-----------------------------------------
 
 # --- Copilot suggested mehtods: ---------------------------------------
 

@@ -5,6 +5,9 @@ from typing import Literal
 from ase.io import Trajectory
 from pymatgen.io.ase import AseAtomsAdaptor
 
+import numpy as np
+import pandas as pd
+
 from custodian.vasp.handlers import ( 
     VaspErrorHandler,
     MeshSymmetryErrorHandler,
@@ -309,6 +312,26 @@ class Job_handler():
             )
             
         self.rframe.candidates[candidate_id].processes[process_id].status = 'submitted'
+
+    def _update_ideal_over_pot(self, candidate_id) -> None:
+        # <<< ---------------------------------------------------------- NOT A PROPOR IMPLIMENTATION...
+        cand_row = self.rframe.candidates[candidate_id]
+        study = cand_row.df['study_obj'].values[0]
+        sur_studies = study.get_surface_studies()
+
+        over_pots = []
+        for sur_study in sur_studies.values():
+            sur_study.update_adsorption_energies()
+            ad_sites_df = sur_study.get_adsorption_sites_df()
+            ad_sites_O_Gs = ad_sites_df['G_approx(O)'].values
+            ad_sites_O_Gs = np.array(ad_sites_O_Gs, dtype=np.float64)
+            ad_sites_O_Gs = ad_sites_O_Gs[~np.isnan(ad_sites_O_Gs)]
+            print(ad_sites_O_Gs)
+            over_pots.append(ad_sites_O_Gs - 2.46)
+        
+        self.rframe.candidates[candidate_id].idealOverPotential \
+            = min(over_pots)
+
         
     def update_log(self) -> None:
 
@@ -335,8 +358,8 @@ class Job_handler():
                     E = atoms[0].charge # Not needed-at least currently
 
                     candt_id = pdf_row['candidate_id']
-                    cnad_row = self.rframe.candidates[candt_id]
-                    study = cnad_row.df['study_obj'].values[0]
+                    cand_row = self.rframe.candidates[candt_id]
+                    study = cand_row.df['study_obj'].values[0]
                     
                     job_type = pdf_row['job_type']
                     termination_index = pdf_row['termination_index']
@@ -361,6 +384,8 @@ class Job_handler():
                                 raise NotImplementedError(f"Result processing "
                                     f"for job type {job_type} not implemented ")
                        
+                            self._update_ideal_over_pot(candt_id)
+
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'completed'
         

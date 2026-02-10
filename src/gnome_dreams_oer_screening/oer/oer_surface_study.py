@@ -93,6 +93,18 @@ class OER_surface_study:
         self.relaxed_surface_add_sites_studies = {}
         self.non_relaxed_surface_add_sites_studies = {}
 
+
+    def get_non_relaxed_surface(self) -> Atoms:
+        return self.base_surface_non_relaxed.copy()
+
+    def get_relaxed_surface(self) -> Atoms | None:
+        if self.base_surface_relaxed is None:
+            raise ValueError("No relaxed surface has been provided " \
+                             "yet. It needs to be set by calling " \
+                                "'set_relaxed_base_surface' method.")
+        return self.base_surface_relaxed.copy()
+
+
     def set_relaxed_base_surface(self, surface: Atoms, 
                                  energy: float | None = None) -> None:
         self.base_surface_relaxed = surface
@@ -105,6 +117,7 @@ class OER_surface_study:
             except:
                 raise ValueError("Energy not provided and could not " \
                                  "be obtained from the relaxed atoms")
+
 
     def determine_adsorption_sites(self, top_layer_tol: float = 1.5,
                                   use_relaxed_surface: bool = True):
@@ -300,6 +313,7 @@ class OER_surface_study:
                     species: str, energies_dict,
                     default_energies_and_corrections: dict[str, float]):
         
+        print(default_energies_and_corrections)
         
         E_pure = self.relaxed_surface_energy
         E_add = energies_dict.get(f"{species}_adsorbed_energy")
@@ -308,8 +322,10 @@ class OER_surface_study:
             f"{species}_ad_correction")
         G_adsorbed_approx = E_adsorbed + corr
 
-        G_H = default_energies_and_corrections.get('H2_gas_free_energy') / 2
-        G_H2O = default_energies_and_corrections.get('H2O_gas_free_energy')
+        print(default_energies_and_corrections['H2_gas_free_energy'])
+
+        G_H = default_energies_and_corrections['H2_gas_free_energy'] / 2
+        G_H2O = default_energies_and_corrections['H2O_gas_free_energy']
 
         if species == 'O':
             G_approx = G_adsorbed_approx + 2*G_H - G_H2O
@@ -337,15 +353,3 @@ class OER_surface_study:
         else:
             df = self.add_sites_df_non_relaxed.copy()
         return df
-
-    def get_non_relaxed_surface(self) -> Atoms:
-        return self.base_surface_non_relaxed.copy()
-
-    def get_relaxed_surface(self) -> Atoms | None:
-        if self.base_surface_relaxed is None:
-            raise ValueError("No relaxed surface has been provided " \
-                             "yet. It needs to be set by calling " \
-                                "'set_relaxed_base_surface' method.")
-        return self.base_surface_relaxed.copy()
-
-

@@ -236,11 +236,20 @@ class calculational_setup():
         
         if 'test' in self.mode:
             atoms = AseAtomsAdaptor.get_atoms(structure)
+
+            K_O = 0.070 + (-6.77) - (-14.217)
+            K_OH = 0.361 + (-6.77)/2 - (-14.217)
+            x = 2.46 - K_O
+            y = 1.23 - 2*x + K_OH
             
+            random_factor = np.random.normal(loc = 0, scale = 1)
+
             # Fake energy calculation:
-            fake_energy = len(atoms) * 2.46 + 2*np.random.rand() - 1
-            if 'H' in atoms.symbols():
-                fake_energy += -3.69            
+            if 'H' in atoms.symbols:
+                fake_energy = x * len(atoms) - y + random_factor
+            else:
+                fake_energy = x * len(atoms) + random_factor
+
             atoms[0].charge = fake_energy  # just to store energy
             save_fake_results_to_traj(directory, atoms)
 

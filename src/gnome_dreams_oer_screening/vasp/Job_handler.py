@@ -1,7 +1,9 @@
 from datetime import datetime
-from email.mime import message
+from pysqa import QueueAdapter
 from pathlib import Path
 from typing import Literal
+from ase.io import Trajectory
+from pymatgen.io.ase import AseAtomsAdaptor
 
 from custodian.vasp.handlers import ( 
     VaspErrorHandler,
@@ -22,9 +24,12 @@ from custodian.vasp.handlers import (
 
 from gnome_dreams_oer_screening.vasp.vasp_calculation import (
     run_vasp_via_custodian, calculational_setup)
-from gnome_dreams_oer_screening.explog.relational_frame import RelationalFrame
+from gnome_dreams_oer_screening.explog.relational_frame import (
+    RelationalFrame)
+from gnome_dreams_oer_screening import get_my_jobs_status
 
-from pysqa import QueueAdapter
+
+
 
 
 class queue_factory():
@@ -138,7 +143,8 @@ class Job_handler():
         if termination_index is None:
             termination_mask = pdf["termination_index"].isna()
         else:
-            termination_mask = pdf["termination_index"] == termination_index
+            termination_mask = pdf["termination_index"] \
+                == termination_index
 
         # Site filter
         if site_index is None:
@@ -171,7 +177,7 @@ class Job_handler():
         p_N = len(p_df)
         new_process_row['process_id'] = str(p_N)
         new_process_row['VASP_dir'] = str(self.vasp_dir / 
-            f"{self.vasp_dir_prefix}_{candidate_id}_" \
+            f"{self.vasp_dir_prefix}{candidate_id}_" \
             f"{job_type}_{new_process_row['process_id']}")
                 
         self.rframe.processes.add_row(new_process_row, 
@@ -191,6 +197,12 @@ class Job_handler():
         vasp_cmd: list = ["mpiexec", "vasp_std"],
         max_errors: int = 20
         ) -> None:
+
+        if isinstance(process_id, int):
+            process_id = str(process_id)
+        if not isinstance(process_id, str):
+            raise ValueError("process_id must be a string or an " \
+                "integer.")
 
         # Get the study object for the candidate:
         study_obr = self.rframe.candidates[candidate_id].df["study_obj"]
@@ -212,20 +224,55 @@ class Job_handler():
         
         # Get the calculation directory from the process row:
         calc_dir = Path(process_row['VASP_dir'].values[0])
+    
+        # Get the job type from the process row:    
+        job_type = process_row['job_type'].values[0]
 
-        # Get pymatgen structure, relevant for the calculation type:
-        if process_row['job_type'].values[0] == 'bulk_relaxation':
+
+        if job_type == 'bulk_relaxation':
             init_structure = study.get_init_structure()
             self.calc_setup.bulk_relaxation(
                 structure = init_structure, directory = calc_dir)
 
-        elif process_row['job_type'].values[0] in \
-            ["surface_relaxation", "O_adsorption", 'OH_adsorption']:
+        elif job_type in ["surface_relaxation", "O_adsorption", 
+                          'OH_adsorption']:
 
-            raise NotImplementedError(f"Calculation type "\
-                f"{process_row['job_type'].values[0]} not " \
-                    f"implemented yet.")
-        
+            termination_index = \
+                process_row['termination_index'].values[0]
+            site_index = process_row['site_index'].values[0]
+
+            # Test if surface studies have been initialized:
+            surface_studies = study.get_surface_studies()
+            if surface_studies is None:
+                raise RuntimeError(f"Surface studies have not been " \
+                    f"initialized for candidate  {candidate_id}. " \
+                    f"Cannot submit surface relaxation job.")
+
+            if termination_index not in surface_studies.keys():
+                raise ValueError(f"Termination index has not been " \
+                    f"initialized for candidate {candidate_id}. " \
+                    f"Cannot submit surface relaxation job.")
+            
+            surface_so = surface_studies[termination_index]
+
+            if job_type == "surface_relaxation":
+                init_atoms = surface_so.get_non_relaxed_surface()
+                init_structure \
+                    = AseAtomsAdaptor.get_structure(init_atoms)
+
+            elif job_type in ["O_adsorption", 'OH_adsorption']:
+                adsite_studies = surface_so.\
+                    get_adsorption_site_studies_dict()
+                ad_study = adsite_studies[site_index]
+                
+                if job_type == "O_adsorption":
+                    init_atoms = ad_study.get_initial_surface_with_O()
+                    init_structure \
+                        = AseAtomsAdaptor.get_structure(init_atoms)
+                elif job_type == 'OH_adsorption':
+                    raise NotImplementedError(f"Submission for job type"
+                        f" {job_type} not implemented yet.")
+
             self.calc_setup.surface_relaxation(
                 structure = init_structure, directory = calc_dir
             )
@@ -262,4 +309,64 @@ class Job_handler():
         self.rframe.candidates[candidate_id].processes[process_id].status = 'submitted'
         
     def update_log(self) -> None:
+
+        # --- Identify calculations to update --------------------------
+        if self.mode == 'test':
+            for idx, pdf_row in self.rframe.processes.df.iterrows():
+                if pdf_row['status'] == 'submitted':
+                    self.rframe.processes.df.at[idx, 'status'] = \
+                        'updating'
+
+        else:
+            slurm_queue = get_my_jobs_status()
+
+            # IMPLIMENT UPDATING OF LOG BASED ON SLURM QUEUE STATUS:    <<< --- CAN SPECIFY FURTHER LATER
+
+        # --- Read results and mark as compleat or failed --------------
+        if self.mode in ['test', 'slurm_test']:
+            for idx, pdf_row in self.rframe.processes.df.iterrows():
+                if pdf_row['status'] == 'updating':
+                    
+                    vasp_dir = Path(pdf_row['VASP_dir'])
+                    traj = Trajectory(vasp_dir / 'fake_result.traj')
+                    atoms = traj[-1]
+                    E = atoms[0].charge # Not needed-at least currently
+
+                    candt_id = pdf_row['candidate_id']
+                    cnad_row = self.rframe.candidates[candt_id]
+                    study = cnad_row.df['study_obj'].values[0]
+                    
+                    job_type = pdf_row['job_type']
+                    termination_index = pdf_row['termination_index']
+                    site_index = pdf_row['site_index']
+
+                    if job_type == 'bulk_relaxation':
+                        study.set_relaxed_structure(atoms)
+                    else:
+                        surface_studies = study.get_surface_studies()
+                        surface_so = surface_studies[termination_index]
+                        
+                        if job_type == 'surface_relaxation':                            
+                            surface_so.set_relaxed_base_surface(atoms,E)
+                        else:                                
+                            ad_site_dict = surface_so.\
+                                get_adsorption_site_studies_dict()
+                            ad_study = ad_site_dict[site_index]
+                            if job_type == 'O_adsorption':
+                                ad_study.set_relaxed_surface_with_O(
+                                    atoms, E)
+                            elif job_type == 'OH_adsorption':
+                                raise NotImplementedError(f"Result processing "
+                                    f"for job type {job_type} not implemented ")
+                       
+                    self.rframe.processes.df.at[idx, 'status'] = \
+                        'completed'
+        
+
+        
+        
+
+
+
+
         return self.rframe.processes

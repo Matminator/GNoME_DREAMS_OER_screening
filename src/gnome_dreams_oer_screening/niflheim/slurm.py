@@ -4,7 +4,7 @@ ACCESSIBLE_NODES = [
     "xeon24el8", 'xeon40el8', 'xeon56'
 ]
 
-def get_status_my_jobs():
+def get_my_jobs_status():
     out = subprocess.check_output(
         ["squeue", "--me", "-h", "-o", "%i %T"],
         text=True

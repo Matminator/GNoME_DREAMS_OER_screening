@@ -107,18 +107,21 @@ class OER_catalyst_study:
     def get_init_atoms(self) -> Atoms:
         return self.init_atoms.copy()
     
-    def set_bulk_structure(self, relaxed_bulk: Atoms | Structure
+    def set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
                            ) -> None:
         
         # <<<<---------------------------------------------------------- SHOULD TEST IF SURFACES HAS BEEN CREATED
-        
-        if not isinstance(relaxed_bulk, Atoms):
-            relaxed_bulk = AseAtomsAdaptor.get_structure(
+
+        if isinstance(relaxed_bulk, Atoms):
+            self.bulk_structure = AseAtomsAdaptor.get_structure(
                 relaxed_bulk)
-            bulk_atoms = relaxed_bulk
+            self.bulk_atoms = relaxed_bulk
         elif isinstance(relaxed_bulk, Structure):
-            bulk_structure = relaxed_bulk      
-            bulk_atoms = AseAtomsAdaptor.get_atoms(relaxed_bulk)
+            self.bulk_structure = relaxed_bulk      
+            self.bulk_atoms = AseAtomsAdaptor.get_atoms(relaxed_bulk)
+        else:
+            raise ValueError("relaxed_bulk must be an ASE Atoms " \
+                "object or a Pymatgen Structure object.")
 
 
     def get_study_progress(self):

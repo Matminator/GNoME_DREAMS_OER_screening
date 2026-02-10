@@ -77,6 +77,9 @@ class Explog:
         = 'auto') -> None:
         self.job_handler.submit_vasp_calculation(candidate_id,
             process_id, partition=partition)
+        
+    def update_log(self):
+        self.job_handler.update_log()
 
 # --- Copilot suggested mehtods: ---------------------------------------
 

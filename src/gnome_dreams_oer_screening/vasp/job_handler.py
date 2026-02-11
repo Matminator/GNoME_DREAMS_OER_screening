@@ -335,7 +335,7 @@ class Job_handler():
             = min(over_pots)
 
         
-    def update_log(self) -> None:
+    def update_log(self) -> dict:
 
         # --- Identify calculations to update --------------------------
         if self.mode == 'test':
@@ -350,6 +350,8 @@ class Job_handler():
             # IMPLIMENT UPDATING OF LOG BASED ON SLURM QUEUE STATUS:    <<< --- CAN SPECIFY FURTHER LATER
 
         # --- Read results and mark as compleat or failed --------------
+        updates = {}
+
         if self.mode in ['test', 'slurm_test']:
             for idx, pdf_row in self.rframe.processes.df.iterrows():
                 if pdf_row['status'] == 'updating':
@@ -390,11 +392,12 @@ class Job_handler():
 
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'completed'
-        
+                    
+                    updates[pdf_row['process_id']] = 'completed'
 
         
         
 
 
-        return None
+        return updates
         # return self.rframe.processes

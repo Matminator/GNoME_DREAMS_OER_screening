@@ -73,11 +73,11 @@ class Explog:
         return self.job_handler.enter_process(candidate_id, 
             calculation_type, termination_index, site_index, note)
         
-    def submit_process(self, candidate_id: str, process_id: str,
+    def submit_process(self, process_id: str,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto']
         = 'auto') -> None:
-        self.job_handler.submit_vasp_calculation(candidate_id,
-            process_id, partition=partition)
+        self.job_handler.submit_vasp_calculation(process_id, 
+                                                 partition=partition)
         
     def update_log(self):
         return self.job_handler.update_log()

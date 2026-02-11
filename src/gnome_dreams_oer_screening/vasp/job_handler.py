@@ -190,7 +190,6 @@ class Job_handler():
 
     def submit_vasp_calculation(
         self,
-        candidate_id: str,
         process_id: str,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto'],
         custodian_handlers: list = [VaspErrorHandler(),
@@ -209,15 +208,17 @@ class Job_handler():
             raise ValueError("process_id must be a string or an " \
                 "integer.")
 
-        # Get the study object for the candidate:
-        study_obr = self.rframe.candidates[candidate_id].df["study_obj"]
-        study = study_obr.values[0]
-        
         # Get the process row for the candidate and process id:s
         process_row = self.rframe.processes.df.loc[
-            (self.rframe.processes.df['candidate_id'] == candidate_id) &
             (self.rframe.processes.df['process_id'] == process_id)
         ]
+        
+        # Get the candidate id from the process row:
+        candidate_id = process_row['candidate_id'].values[0]
+
+        # Get the study object for the candidate:
+        study_obr = self.rframe.candidates[candidate_id].df["study_obj"]
+        study = study_obr.values[0]        
 
         # Test if process row exists and is un-submitted:
         if len(process_row) == 0:

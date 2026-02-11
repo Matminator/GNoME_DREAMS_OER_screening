@@ -552,10 +552,13 @@ class OER_catalyst_study:
 
     def get_termination_rankings(self, normalize_scores = True
                                      ) -> pd.DataFrame:
-        if normalize_scores:
-            self.normalize_termination_scores()
-        return self.termination_ranking_df.copy()
-        
+        out = None
+        if self.termination_ranking_df is not None:
+            if normalize_scores:
+                self.normalize_termination_scores()
+            out = self.termination_ranking_df.copy()
+        return out
+    
     def initialize_oer_surface_study(self, 
             termination_index: int,
             miller_indices: tuple[int, int, int] | None = None, 

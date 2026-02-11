@@ -212,7 +212,7 @@ class Job_handler():
         process_row = self.rframe.processes.df.loc[
             (self.rframe.processes.df['process_id'] == process_id)
         ]
-        
+
         # Get the candidate id from the process row:
         candidate_id = process_row['candidate_id'].values[0]
 
@@ -327,8 +327,9 @@ class Job_handler():
             ad_sites_O_Gs = ad_sites_df['G_approx(O)'].values
             ad_sites_O_Gs = np.array(ad_sites_O_Gs, dtype=np.float64)
             ad_sites_O_Gs = ad_sites_O_Gs[~np.isnan(ad_sites_O_Gs)]
-            print(ad_sites_O_Gs)
-            over_pots.append(ad_sites_O_Gs - 2.46)
+            over_pots.append(np.round(
+                                   (np.abs(ad_sites_O_Gs - 2.46))
+                                    , 2))
         
         self.rframe.candidates[candidate_id].idealOverPotential \
             = min(over_pots)

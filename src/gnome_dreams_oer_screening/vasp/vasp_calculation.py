@@ -10,8 +10,6 @@ from ase.io import read, Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
 
-from executorlib import SlurmClusterExecutor
-
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
 from custodian.vasp.handlers import ( 
@@ -135,62 +133,6 @@ def clean_up_vasp_directory(
         except Exception as e:
             print(f"Could not remove {file}: {e}")
 
-def exlib_run_slurm_test(**kwargs):
-    time.sleep(8*60)
-
-def exlib_run_vasp(
-    directory, 
-    return_vasp_out = True,
-    handlers = [VaspErrorHandler()],
-    vasp_cmd = ["mpiexec", "vasp_std"],
-    auto_npar = True,
-    max_errors = 20
-    ):
-    """
-    Function for running a VASP calculation via Custodian and returning
-    results.
-
-    Parameters:
-    directory (PathLike): directory where VASP calculation will be run.
-    return_vasp_out (bool): Whether to return the content of vasp.out
-    file.
-    handlers (list): A list of Custodian error handlers to use.
-    vasp_cmd (list): The command to run VASP.
-    auto_npar (bool): Whether Custodian should automatically adjust 
-    NPAR.
-    max_errors (int): Maximum number of errors to tolerate by Custodian
-    before terminating the calculation.
-    """
-    
-    try:
-        run_vasp_via_custodian(
-            directory=directory,
-            handlers=handlers,
-            vasp_cmd=vasp_cmd,
-            auto_npar=auto_npar,
-            max_errors=max_errors
-        )
-
-        atoms_result = read_vasp_results(
-            directory=directory,
-            return_only_final=True
-        )[0]
-        E = atoms_result.get_total_energy()
-        out = {"atoms_result": atoms_result, "E": E, "error": None}
-
-        clean_up_vasp_directory(directory=directory)
-
-    except Exception as e:
-        out = {"atoms_result": None, "E": None, "error": str(e)}
-
-    if return_vasp_out:
-        with open(directory / "vasp.out", "r") as f:
-            vasp_text = f.read()
-        out["vasp_out"] = vasp_text
-    else:
-        out["vasp_out"] = None
-
-    return out
 
 def save_fake_results_to_traj(directory: Path, atoms: Atoms):
     out_traj = Trajectory(directory / "fake_result.traj", "w")
@@ -220,7 +162,7 @@ class calculational_setup():
                         ) -> None:
         vasp_set = self.bulk_set(structure = structure)
         vasp_set.write_input(directory, potcar_spec = False if 
-                             self.mode =='production' else True)
+                             'production' in self.mode else True)
         
         if 'test' in self.mode:
             atoms = AseAtomsAdaptor.get_atoms(structure)
@@ -232,7 +174,7 @@ class calculational_setup():
                            ) -> None:
         vasp_set = self.surface_set(structure = structure)
         vasp_set.write_input(directory, potcar_spec = False if 
-                             self.mode =='production' else True)
+                             'production' in self.mode else True)
         
         if 'test' in self.mode:
             atoms = AseAtomsAdaptor.get_atoms(structure)

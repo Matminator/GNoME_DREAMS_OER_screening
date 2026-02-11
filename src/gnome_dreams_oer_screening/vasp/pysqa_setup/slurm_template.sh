@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name DFT_AGENT
-#SBATCH -e ./slabord.err
-#SBATCH -o ./slabord.out
+#SBATCH --job-name A_DFT
 #SBATCH --mail-type None
-#SBATCH -N 1
-#SBATCH -n 40
-#SBATCH -p xeon40el8
-#SBATCH -t 50:00:00
+#SBATCH -e {{slurm_out_name}}.err
+#SBATCH -o {{slurm_out_name}}.out
+#SBATCH -n {{cores}}        # Total cores
+#SBATCH -N {{nodes}}        # Number of nodes
+#SBATCH -p {{partition}}
+#SBATCH -t {{walltime}}
 
 module purge
 module use /home/modules/energy/modules/all

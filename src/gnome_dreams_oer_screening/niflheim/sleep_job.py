@@ -2,5 +2,5 @@ import sys
 import time
 
 if __name__ == "__main__":
-    candidate_id = sys.argv[1]
-    time.sleep(2*60)
+    sleep_mins = int(sys.argv[1])
+    time.sleep(sleep_mins * 60)

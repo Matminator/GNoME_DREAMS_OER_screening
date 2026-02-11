@@ -26,69 +26,10 @@ from custodian.vasp.handlers import (
 )
 
 from gnome_dreams_oer_screening.vasp.vasp_calculation import (
-    run_vasp_via_custodian, calculational_setup)
+    calculational_setup)
 from gnome_dreams_oer_screening.explog.relational_frame import (
     RelationalFrame)
 from gnome_dreams_oer_screening import get_my_jobs_status
-
-
-
-
-
-class queue_factory():
-    def __init__(self, mode: Literal["test", "slurm_test",
-                        "production_test", "production"] ):
-        self.mode = mode
-        self.partition_configs = {
-            "xeon24el8_test": {
-                "nodes": 1,
-                "cores": 1,
-                "run_time_max": "00:10:00",
-                "mail-type": "NONE"
-            },
-            "xeon24el8": {
-                "nodes": 1,
-                "cores": 24,
-                "run_time_max": "50:00:00",
-                "mail-type": "NONE"
-            },
-            "xeon40el8": {
-                "nodes": 1,
-                "cores": 40,
-                "run_time_max": "50:00:00",
-                "mail-type": "NONE"
-            },
-            "xeon56": {
-                "nodes": 1,
-                "cores": 56,
-                "run_time_max": "50:00:00",
-                "mail-type": "NONE"
-            },
-        }
-
-    def create_queue(self, partition: Literal["xeon24el8", "xeon40el8", 
-                                "xeon56", "auto"]) -> QueueAdapter:
-        
-        if self.mode in ["test", "slurm_test"]:
-            partition = "xeon24el8_test"
-        else:
-            if partition == "auto":
-                # Placeholder for auto resource selection logic: <<< --- CAN SPECIFY FURTHER LATER
-                partition = "xeon40el8"
-
-        if partition not in self.partition_configs:
-            raise ValueError(f"Unknown partition: {partition}")
-        
-        config = self.partition_configs[partition]
-
-        return QueueAdapter(
-            scheduler_type="slurm",
-            job_name="A_vasp_job",
-            queue_name=partition,
-            # stderr="./slabord.err",      # corresponds to -e
-            # stdout="./slabord.out",      # corresponds to -o
-            **config
-            )
     
 
 class Job_handler():
@@ -98,7 +39,8 @@ class Job_handler():
         vasp_calculation_dir: Path,
         mode: Literal["test", "slurm_test", "production_test", 
                       "production"] = "production",
-        prefix_vasp_dirs_with_prefix: bool = True
+        prefix_vasp_dirs_with_prefix: bool = True,
+        sleep_min: int = 2
         ) -> None:
 
         # Create the directory if it doesn't exist
@@ -108,8 +50,11 @@ class Job_handler():
         self.vasp_dir = vasp_calculation_dir
         self.rframe = rframe
         self.mode = mode
-        self.queue_factory = queue_factory(mode=mode)
         self.calc_setup = calculational_setup(mode=mode)
+
+        current_dir = Path(__file__).resolve().parent
+        pysqa_yaml_path = current_dir / 'pysqa_setup/'
+        self.queueadapter = QueueAdapter(directory=pysqa_yaml_path)
 
         if prefix_vasp_dirs_with_prefix:
             now = datetime.now()
@@ -118,6 +63,9 @@ class Job_handler():
         else:
             timestamp = ""
         self.vasp_dir_prefix = timestamp
+
+        if self.mode == "slurm_test":
+            self.sleep_min = sleep_min
 
     def enter_process(
         self,
@@ -192,12 +140,6 @@ class Job_handler():
         self,
         process_id: str,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto'],
-        custodian_handlers: list = [VaspErrorHandler(),
-        MeshSymmetryErrorHandler(), NonConvergingErrorHandler(),
-        UnconvergedErrorHandler(), FrozenJobErrorHandler(),
-        StdErrHandler(), PositiveEnergyErrorHandler()
-        # LargeSigmaHandler(), IncorrectSmearingHandler(), 
-        ],
         vasp_cmd: list = ["mpiexec", "vasp_std"],
         max_errors: int = 20
         ) -> None:
@@ -233,7 +175,6 @@ class Job_handler():
     
         # Get the job type from the process row:    
         job_type = process_row['job_type'].values[0]
-
 
         if job_type == 'bulk_relaxation':
             init_structure = study.get_init_structure()
@@ -283,36 +224,56 @@ class Job_handler():
                 structure = init_structure, directory = calc_dir
             )
 
+        slurm_id = 42 + int(process_id) # Dummy initialization for test mode
         if self.mode != 'test':
-            # Get partion settings from queue factory:
-            if self.mode == 'slurm_test':
-                queue_settings = self.queue_factory.create_queue(
-                    partition='xeon24el8_test')
-            else:
-                queue_settings = self.queue_factory.create_queue(
-                    partition=partition)
-
-            # Define python function
-            if self.mode == 'slurm_test':
-                job_type = 'gnome_dreams_oer_screening.niflheim.' + \
-                    'sleep_job.py'
-            else:   
-                raise NotImplementedError(f"Job submission not implemented for mode {self.mode} yet.")
-
-            job_id_tmp = self.qa.submit(
-                command = f"python3 {job_type} {calc_dir.resolve()}",
-                additional_script_lines=[
-                    "module purge",
-                    "module use /home/modules/energy/modules/all",
-                    "module load VASP/6.5.1-intel-2023a",
-                    "module load impi/2021.9.0-intel-compilers-2023.1.0",
-                    "ml Python/3.11.3-GCCcore-12.3.0",
-                    "source venv/bin/activate",
-                ]
-                **queue_settings
-            )
             
-        self.rframe.candidates[candidate_id].processes[process_id].status = 'submitted'
+            if self.mode == 'slurm_test':
+                python_sp = 'src/gnome_dreams_oer_screening/niflheim/'+ \
+                    f'sleep_job.py {self.sleep_min}'
+                partition = 'xeon24el8_test'
+                cores, nodes = 1, 1
+                walltime = f"00:0{self.sleep_min}:00"
+
+            else:
+
+                python_sp = 'src/gnome_dreams_oer_screening/vasp/'+ \
+                    f'run_vasp.py' + f" {calc_dir.resolve()}"
+
+                if partition == 'auto':
+                    partition = 'xeon40el8' # <<< ---------------------- CAN MAKE THIS MORE INTELLIGENT LATER
+                
+                if partition == 'xeon56':
+                    cores, nodes = 56, 1
+                elif partition == 'xeon40el8':
+                    cores, nodes = 40, 1
+                elif partition == 'xeon24el8':
+                    cores, nodes = 24, 1
+                else:
+                    raise ValueError(f"Partition {partition} not " \
+                                     f"recognized.")
+
+                walltime = "50:00:00"
+
+
+                # curently overwriting for testing purposes:
+                partition = 'xeon24el8_test'
+                cores, nodes = 1, 1
+                walltime = f"00:01:00"
+            
+
+            slurm_id = self.queueadapter.submit_job(
+                command = f"python3 {python_sp} {calc_dir.resolve()}",
+                slurm_out_name = calc_dir / "slurm_output",
+                partition = partition,
+                cores= cores,
+                nodes= nodes,
+                walltime=walltime,
+            )
+
+        self.rframe.candidates[candidate_id].processes[process_id]\
+            .status = 'submitted'
+        self.rframe.candidates[candidate_id].processes[process_id]\
+            .slurmID = slurm_id
 
     def _update_ideal_over_pot(self, candidate_id) -> None:
         # <<< ---------------------------------------------------------- NOT A PROPOR IMPLIMENTATION...
@@ -328,8 +289,7 @@ class Job_handler():
             ad_sites_O_Gs = np.array(ad_sites_O_Gs, dtype=np.float64)
             ad_sites_O_Gs = ad_sites_O_Gs[~np.isnan(ad_sites_O_Gs)]
             over_pots.append(np.round(
-                                   (np.abs(ad_sites_O_Gs - 2.46))
-                                    , 2))
+                                   (np.abs(ad_sites_O_Gs - 2.46)), 2))
         
         self.rframe.candidates[candidate_id].idealOverPotential \
             = min(over_pots)
@@ -395,9 +355,4 @@ class Job_handler():
                     
                     updates[pdf_row['process_id']] = 'completed'
 
-        
-        
-
-
         return updates
-        # return self.rframe.processes

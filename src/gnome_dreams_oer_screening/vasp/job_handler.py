@@ -394,6 +394,5 @@ class Job_handler():
         
 
 
-
-
-        return self.rframe.processes
+        return None
+        # return self.rframe.processes

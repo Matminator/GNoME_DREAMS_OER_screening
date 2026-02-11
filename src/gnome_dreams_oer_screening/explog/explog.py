@@ -11,7 +11,8 @@ from gnome_dreams_oer_screening.vasp.job_handler import Job_handler
 
 
 class Explog:
-    def __init__(self, 
+    # we'll manually init later
+    def init(self, 
         vasp_calculation_dir: Path | str = Path("vasp_calculations"),
         mode: Literal["test", "slurm_test", "production_test", 
                       "production"] = "production",
@@ -79,10 +80,12 @@ class Explog:
             process_id, partition=partition)
         
     def update_log(self):
-        self.job_handler.update_log()
+        return self.job_handler.update_log()
 
         #  SOULD RETURN A DICT, WITH ALL UPDATES... <<<-----------------------------------------
 
+EXPLOG = Explog()
+    
 # --- Copilot suggested mehtods: ---------------------------------------
 
     # def process_message(self, message):

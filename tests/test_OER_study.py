@@ -30,7 +30,7 @@ def test_setup_2():
     )
 
     atoms_to_relax = oer_study.get_init_atoms()
-    oer_study.set_bulk_structure(atoms_to_relax)
+    oer_study.set_relaxed_structure(atoms_to_relax)
 
     assert oer_study.get_bulk_atoms() ==  atoms
     assert oer_study.get_bulk_structure() == \

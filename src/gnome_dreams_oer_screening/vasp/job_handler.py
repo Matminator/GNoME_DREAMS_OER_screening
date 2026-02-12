@@ -347,7 +347,7 @@ class Job_handler():
                 vasp_dir = Path(pdf_row['VASP_dir'])
                 clean_up_vasp_directory(vasp_dir)
                 try:
-                    atoms = read_vasp_results(vasp_dir)
+                    atoms = read_vasp_results(vasp_dir)[-1]
                 except Exception as e:
                     self.rframe.processes.df.at[idx, 'status'] \
                         = 'failed'

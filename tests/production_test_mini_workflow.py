@@ -12,7 +12,7 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 # --- IMPORTS FROM THIS PROJECT ---
 from gnome_dreams_oer_screening import OER_catalyst_study
-from gnome_dreams_oer_screening import Explog, get_my_jobs_status
+from gnome_dreams_oer_screening import Explog
 
 def waite_for_processe_to_finish(process_id):
     iter = 0

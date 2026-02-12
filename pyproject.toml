@@ -31,3 +31,11 @@ where = ["src"]
 minversion = "7.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+filterwarnings = [
+    "ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib.*"
+]
+
+markers = [
+    "mini: marks fast tests for quick runs"
+]

@@ -1,18 +1,14 @@
 # --- standard library imports ---
 import os
 import time
-import numpy as np
-import pandas as pd
 from pathlib import Path
 
-from ase import Atoms
-from ase.io import read, Trajectory
-from ase.visualize import view
+from ase.io import Trajectory
 from pymatgen.io.ase import AseAtomsAdaptor
 
 # --- IMPORTS FROM THIS PROJECT ---
 from gnome_dreams_oer_screening import OER_catalyst_study
-from gnome_dreams_oer_screening import Explog, get_my_jobs_status
+from gnome_dreams_oer_screening import Explog
 
 def waite_for_processe_to_finish(process_id):
     iter = 0

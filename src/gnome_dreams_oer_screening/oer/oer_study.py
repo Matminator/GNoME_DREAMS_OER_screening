@@ -5,12 +5,9 @@ import numpy as np
 import pandas as pd
 
 from typing import Literal
-from collections import Counter
 from ase import Atoms
-from ase.neighborlist import natural_cutoffs
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab, Structure
-from pymatgen.core import Composition
 from pymatgen.core.surface import (
     Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
 from ase.neighborlist import NeighborList, natural_cutoffs
@@ -175,7 +172,7 @@ class OER_catalyst_study:
         atoms.set_pbc(True)
         cutoffs = natural_cutoffs(atoms)
         nl = NeighborList(cutoffs, self_interaction=False, 
-                          bothways=True, skin = 0.3)
+                          bothways=True, skin = 1e-5)
         nl.update(atoms)
         return nl
 
@@ -200,14 +197,11 @@ class OER_catalyst_study:
             list[int]: List of coordination numbers for each atom.
         """
         
-        # Build neighbor list, if only one is needed:
-        if method in ['all', 'disregard-coord-of-O']:
-            atoms_copy = atoms.copy()
-            atoms_copy.set_pbc(True)
-            # The only neighborlist that will be needed:
-            only_nl = self._get_neighborlist(atoms_copy)
-        else:
-            only_nl = None
+        # Build neighbor list:
+        atoms_copy = atoms.copy()
+        atoms_copy.set_pbc(True)
+        # The only neighborlist that will be needed:
+        nl = self._get_neighborlist(atoms_copy)
 
         coord_nums = []
         for index, atom in enumerate(atoms):
@@ -216,27 +210,12 @@ class OER_catalyst_study:
                 cn = 0 # O atoms are ignored
             elif method == 'O-coordination':
 
-                atoms_copy = atoms.copy()
-                atoms_copy.set_pbc(True)
-
-                # Build list of indices to delete
-                delete_indices = [i for i, atom in enumerate(atoms)
-                    if atom.symbol != 'O' and i != index]
-                del atoms_copy[delete_indices]
-
-                index_not_O = [i for i, atom in enumerate(atoms_copy) \
-                    if atom.symbol == atom.symbol != 'O']                
-                if len(index_not_O) != 1:
-                    raise ValueError("Error in determining index of "
-                                     "non-O atom after deletion.")
-                index_in_copy = index_not_O[0]
-
-                nl = self._get_neighborlist(atoms_copy)
-                indices, offsets = nl.get_neighbors(index_in_copy)
+                indices, offsets = nl.get_neighbors(index)
+                indices = [i for i in indices if atoms[i].symbol == 'O']
 
                 coord_nums.append(len(indices)) # len(indices) = CN
             else:
-                indices, offsets = only_nl.get_neighbors(index)
+                indices, offsets = nl.get_neighbors(index)
                 coord_nums.append(len(indices)) # len(indices) = CN
                 
         return coord_nums

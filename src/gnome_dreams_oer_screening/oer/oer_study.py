@@ -110,8 +110,14 @@ class OER_catalyst_study:
     def set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
                            ) -> None:
         
-        # <<<<---------------------------------------------------------- SHOULD TEST IF SURFACES HAS BEEN CREATED
-
+        if len(self.terminations) > 0:
+            raise RuntimeError("Relaxed bulk structure cannot be set " \
+                "after surfaces have been generated. Once surfaces "
+                "have been generated, the relaxed bulk structure " \
+                "You will need to create a new OER_catalyst_study " \
+                "instance if you want to use a different relaxed bulk" \
+                " structure")
+        
         if isinstance(relaxed_bulk, Atoms):
             self.bulk_structure = AseAtomsAdaptor.get_structure(
                 relaxed_bulk)
@@ -122,11 +128,6 @@ class OER_catalyst_study:
         else:
             raise ValueError("relaxed_bulk must be an ASE Atoms " \
                 "object or a Pymatgen Structure object.")
-
-
-    def get_study_progress(self):
-        pass
-        # <<<<---------------------------------------------------------- THERE SHOULD BE A STATUS INDICATING THE PROGRESS OF THE STUDY
 
     def set_energies(self,
             H2O_gas_free_energy: float = None,
@@ -258,29 +259,6 @@ class OER_catalyst_study:
                                               coord_numbers)
 
 
-    # --- THIS IS DEPRECATED -------------------------------------------
-    # def _compare_to_bulk_stoichiometry(self, atoms: Atoms,
-    #             compare_O_only_stoichiometry: bool = False) -> bool:
-        
-    #     slab_symbols = [atom.symbol for atom in atoms]
-    #     slab_counts = Counter(slab_symbols)
-    #     slab_comp = Composition(dict(slab_counts))
-    #     slab_reduced, slab_rfactor = slab_comp.get_reduced_composition_and_factor()
-
-    #     bulk_symbols = [atom.symbol for atom in self.bulk_atoms]
-    #     bulk_counts = Counter(bulk_symbols)
-    #     bulk_comp = Composition(dict(bulk_counts))
-    #     bulk_reduced, bulk_rfactor = bulk_comp.get_reduced_composition_and_factor()
-
-    #     if compare_O_only_stoichiometry:
-    #         slab_num_O = slab_reduced.get("O", 0)
-    #         bulk_num_O = bulk_reduced.get("O", 0)
-    #         result = slab_num_O == bulk_num_O
-    #     else:
-    #         result = slab_comp.reduced_formula == bulk_comp.reduced_formula
-
-    #     return result
-    # --- END DEPRECATION ----------------------------------------------
 
     def _build_surfaces(self, 
             miller_indices: tuple[int, int, int],
@@ -578,7 +556,7 @@ class OER_catalyst_study:
             millers_terminations_indecies = df[df['Miller indices'] ==
                         miller_indices]['Termination index'].values
             if termination_index not in millers_terminations_indecies:
-                raise ValueError("The provided termination_index does " \
+                raise ValueError("The provided termination_index does "\
                 "not correspond to the provided miller_indices.")
             
         slab = self.terminations[termination_index]

@@ -8,25 +8,8 @@ from pymatgen.io.ase import AseAtomsAdaptor
 import numpy as np
 import pandas as pd
 
-from custodian.vasp.handlers import ( 
-    VaspErrorHandler,
-    MeshSymmetryErrorHandler,
-    UnconvergedErrorHandler,
-    NonConvergingErrorHandler,
-    PotimErrorHandler,
-    PositiveEnergyErrorHandler,
-    FrozenJobErrorHandler,
-    StdErrHandler,
-    LargeSigmaHandler,
-    IncorrectSmearingHandler,
-    KspacingMetalHandler,
-    PotimErrorHandler, # only relaxation handler
-    DriftErrorHandler, # only relaxation handler
-    WalltimeHandler
-)
-
 from gnome_dreams_oer_screening.vasp.vasp_calculation import (
-    calculational_setup)
+    calculational_setup, read_vasp_results, clean_up_vasp_directory)
 from gnome_dreams_oer_screening.explog.relational_frame import (
     RelationalFrame)
 from gnome_dreams_oer_screening import get_my_jobs_status
@@ -232,7 +215,7 @@ class Job_handler():
                     f'sleep_job.py {self.sleep_min}'
                 partition = 'xeon24el8_test'
                 cores, nodes = 1, 1
-                walltime = f"00:0{self.sleep_min}:00"
+                walltime = f"00:10:00"
 
             else:
 
@@ -254,24 +237,17 @@ class Job_handler():
 
                 walltime = "50:00:00"
 
-
-                # curently overwriting for testing purposes:
-                partition = 'xeon24el8_test'
-                cores, nodes = 1, 1
-                walltime = f"00:01:00"
-            
-
             slurm_id = self.queueadapter.submit_job(
                 command = f"python3 {python_sp} {calc_dir.resolve()}",
-                slurm_out_name = calc_dir / "slurm_output",
+                slurm_out_name = calc_dir / "job_log",
                 partition = partition,
-                cores= cores,
-                nodes= nodes,
-                walltime=walltime,
+                cores = cores,
+                nodes = nodes,
+                walltime = walltime,
             )
 
         self.rframe.candidates[candidate_id].processes[process_id]\
-            .status = 'submitted'
+            .status = 'pending'
         self.rframe.candidates[candidate_id].processes[process_id]\
             .slurmID = slurm_id
 
@@ -297,21 +273,30 @@ class Job_handler():
         
     def update_log(self) -> dict:
 
+        updates = {} # Save all updates in dict
+
         # --- Identify calculations to update --------------------------
         if self.mode == 'test':
             for idx, pdf_row in self.rframe.processes.df.iterrows():
-                if pdf_row['status'] == 'submitted':
+                if pdf_row['status'] == 'pending':
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'updating'
-
         else:
             slurm_queue = get_my_jobs_status()
-
-            # IMPLIMENT UPDATING OF LOG BASED ON SLURM QUEUE STATUS:    <<< --- CAN SPECIFY FURTHER LATER
+            reduced_pdf = self.rframe.processes.df.copy()
+            reduced_pdf = reduced_pdf[reduced_pdf['status'].isin(
+                                                ['running', 'pending'])]
+            for idx, row in reduced_pdf.iterrows():
+                slurm_id = row['slurmID']
+                if slurm_id in slurm_queue.keys():
+                    new_status = slurm_queue[slurm_id].lower()
+                    updates[row['process_id']] = new_status
+                else:
+                    new_status = 'updating'
+                self.rframe.processes.df.at[idx, 'status'] = new_status
+                    
 
         # --- Read results and mark as compleat or failed --------------
-        updates = {}
-
         if self.mode in ['test', 'slurm_test']:
             for idx, pdf_row in self.rframe.processes.df.iterrows():
                 if pdf_row['status'] == 'updating':
@@ -354,5 +339,50 @@ class Job_handler():
                         'completed'
                     
                     updates[pdf_row['process_id']] = 'completed'
+
+        else:
+            r_pdf = self.rframe.processes.df.copy()
+            r_pdf = r_pdf[r_pdf['status'] == 'updating']
+            for idx, pdf_row in r_pdf.iterrows():
+                vasp_dir = Path(pdf_row['VASP_dir'])
+                clean_up_vasp_directory(vasp_dir)
+                try:
+                    atoms = read_vasp_results(vasp_dir)
+                except Exception as e:
+                    self.rframe.processes.df.at[idx, 'status'] \
+                        = 'failed'
+                    updates[pdf_row['process_id']] = 'failed'
+                    continue
+                
+                job_type = pdf_row['job_type']
+                termination_index = pdf_row['termination_index']
+                site_index = pdf_row['site_index']
+                candt_id = pdf_row['candidate_id']
+                cand_row = self.rframe.candidates[candt_id]
+                study = cand_row.df['study_obj'].values[0]
+
+                if job_type == 'bulk_relaxation':
+                    study.set_relaxed_structure(atoms)
+                else:
+                    surface_studies = study.get_surface_studies()
+                    surface_so = surface_studies[termination_index]
+                    
+                    if job_type == 'surface_relaxation':                            
+                        surface_so.set_relaxed_base_surface(atoms)
+                    else:                                
+                        ad_site_dict = surface_so.\
+                            get_adsorption_site_studies_dict()
+                        ad_study = ad_site_dict[site_index]
+                        if job_type == 'O_adsorption':
+                            ad_study.set_relaxed_surface_with_O(atoms)
+                        elif job_type == 'OH_adsorption':
+                            raise NotImplementedError(f"Result processing "
+                                f"for job type {job_type} not implemented ")
+                    
+                    self._update_ideal_over_pot(candt_id)
+
+                self.rframe.processes.df.at[idx, 'status'] = \
+                    'completed'
+                updates[pdf_row['process_id']] = 'completed'
 
         return updates

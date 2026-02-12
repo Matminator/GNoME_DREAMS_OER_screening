@@ -29,13 +29,8 @@ from custodian.vasp.handlers import (
     WalltimeHandler
 )
 
-
-
 from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
     RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet)
-
-
-
 
 def run_vasp_via_custodian(
                 directory, 
@@ -131,7 +126,7 @@ def clean_up_vasp_directory(
             if file.is_file():
                 file.unlink()
         except Exception as e:
-            print(f"Could not remove {file}: {e}")
+            pass
 
 
 def save_fake_results_to_traj(directory: Path, atoms: Atoms):

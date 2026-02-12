@@ -16,7 +16,8 @@ class Explog:
         vasp_calculation_dir: Path | str = Path("vasp_calculations"),
         mode: Literal["test", "slurm_test", "production_test", 
                       "production"] = "production",
-        prefix_vasp_dirs: bool = True
+        prefix_vasp_dirs: bool = True,
+        sleep_min = 2,
         ):
         # Setup of relational frame, with tables for candidates and 
         # processes (both of which are needed for the Job_handler etc.)
@@ -42,7 +43,8 @@ class Explog:
         if isinstance(vasp_calculation_dir, str):
             vasp_calculation_dir = Path(vasp_calculation_dir)
         self.job_handler = Job_handler(rf, vasp_calculation_dir,
-            mode=mode, prefix_vasp_dirs_with_prefix=prefix_vasp_dirs)
+            mode=mode, prefix_vasp_dirs_with_prefix=prefix_vasp_dirs,
+            sleep_min=sleep_min)
         
     def add_candidate(self, 
                       candidate_id: str, 

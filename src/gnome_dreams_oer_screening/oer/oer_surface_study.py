@@ -313,16 +313,12 @@ class OER_surface_study:
                     species: str, energies_dict,
                     default_energies_and_corrections: dict[str, float]):
         
-        print(default_energies_and_corrections)
-        
         E_pure = self.relaxed_surface_energy
         E_add = energies_dict.get(f"{species}_adsorbed_energy")
         E_adsorbed = E_add - E_pure 
         corr = default_energies_and_corrections.get(
             f"{species}_ad_correction")
         G_adsorbed_approx = E_adsorbed + corr
-
-        print(default_energies_and_corrections['H2_gas_free_energy'])
 
         G_H = default_energies_and_corrections['H2_gas_free_energy'] / 2
         G_H2O = default_energies_and_corrections['H2O_gas_free_energy']

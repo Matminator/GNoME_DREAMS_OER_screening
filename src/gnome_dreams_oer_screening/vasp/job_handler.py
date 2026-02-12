@@ -249,7 +249,7 @@ class Job_handler():
         self.rframe.candidates[candidate_id].processes[process_id]\
             .status = 'pending'
         self.rframe.candidates[candidate_id].processes[process_id]\
-            .slurmID = slurm_id
+            .slurmID = str(slurm_id)
 
     def _update_ideal_over_pot(self, candidate_id) -> None:
         # <<< ---------------------------------------------------------- NOT A PROPOR IMPLIMENTATION...

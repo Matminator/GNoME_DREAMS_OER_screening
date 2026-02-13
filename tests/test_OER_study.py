@@ -1,5 +1,6 @@
 import pathlib
 import pytest
+import numpy as np
 
 from ase import Atoms
 from ase.io import read
@@ -62,6 +63,18 @@ def test_error_apon_setting_relaxed_structure():
 # ______________________________________________________________________
 # ___ Testing of coordination number methods for study object __________
 # --- Testing coordination determination for bulk TiO2 rutile ----------
+@pytest.fixture(scope="module")
+def TiO2_r_bulk():
+    dir_path = pathlib.Path(__file__).parent
+    TiO2_r_path = dir_path / '../notebooks/TiO2_rutile.cif'
+    atoms = read(TiO2_r_path.resolve(), format='cif')
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
+        use_init_as_relaxed_bulk=True)
+    if atoms is None:
+        pytest.fail("Slab generation failed")
+    return atoms, oer_study
+
 @pytest.fixture(scope="module")
 def TiO2_r_bulk():
     dir_path = pathlib.Path(__file__).parent
@@ -184,19 +197,82 @@ def test__determine_coordination_numbers_bulk_ZrO2_m_Oc(ZrO2_m_bulk):
 # ______________________________________________________________________
 
 
+
 @pytest.fixture(scope="module")
-def ZrO2_m_surfaces_predicted(ZrO2_m_bulk):
-    atoms, oer_study = ZrO2_m_bulk
+def TiO2_r_surfaces_predicted_O_coordination(TiO2_r_bulk):
+    atoms, oer_study_not_used = TiO2_r_bulk
+
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
+        use_init_as_relaxed_bulk=True)
 
     atoms_to_relax = oer_study.get_init_atoms()
     oer_study.set_relaxed_structure(atoms_to_relax)
-    oer_study.predict_most_likely_surfaces()
+    oer_study.predict_most_likely_surfaces(method = 'O-coordination')
     return oer_study
 
 def test_error_apon_resetting_relaxed_structure(
-        ZrO2_m_surfaces_predicted):
-    oer_study = ZrO2_m_surfaces_predicted
+        TiO2_r_surfaces_predicted_O_coordination):
+    oer_study = TiO2_r_surfaces_predicted_O_coordination
 
     atoms_to_relax = oer_study.get_init_atoms()
     with pytest.raises(RuntimeError):
         oer_study.set_relaxed_structure(atoms_to_relax)
+
+def test_TiO2_r_110_surface_score_calculation_O_coordination(
+        TiO2_r_surfaces_predicted_O_coordination):
+    oer_study = TiO2_r_surfaces_predicted_O_coordination
+
+    df = oer_study.get_termination_rankings()
+    row = df[df['Miller indices'] == (1,1,0)]
+    termination_index = row['Termination index'].values[0]
+    score = row['Score'].values[0]
+    slab = oer_study.terminations[termination_index]
+    slab_atoms = AseAtomsAdaptor.get_atoms(slab)
+
+    cell = slab_atoms.get_cell()
+    A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
+
+    # Ti: 1: -1, (O: 1: -1, but ignored in this method)
+    expected_reduction = -1
+    expected_score = expected_reduction / A_surface
+
+    score_diff = abs(score - expected_score)
+    assert score_diff < 1e-6, f"Expected score: {expected_score}, but" \
+        f" got {score}"
+    
+@pytest.fixture(scope="module")
+def TiO2_r_surfaces_predicted_all_coordination(TiO2_r_bulk):
+    atoms, oer_study_not_used = TiO2_r_bulk
+
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
+        use_init_as_relaxed_bulk=True)
+
+    atoms_to_relax = oer_study.get_init_atoms()
+    oer_study.set_relaxed_structure(atoms_to_relax)
+    oer_study.predict_most_likely_surfaces(method = 'all')
+    return oer_study
+
+def test_TiO2_r_110_surface_score_calculation_all_coordination(
+        TiO2_r_surfaces_predicted_all_coordination):
+    oer_study = TiO2_r_surfaces_predicted_all_coordination
+
+    df = oer_study.get_termination_rankings()
+    row = df[df['Miller indices'] == (1,1,0)]
+    termination_index = row['Termination index'].values[0]
+    score = row['Score'].values[0]
+    slab = oer_study.terminations[termination_index]
+    slab_atoms = AseAtomsAdaptor.get_atoms(slab)
+
+    cell = slab_atoms.get_cell()
+    A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
+
+    # Ti: 1: -1, O: 1: -1
+    expected_reduction = -1 - 1
+    expected_score = expected_reduction / A_surface
+
+    score_diff = abs(score - expected_score)
+    assert score_diff < 1e-6, f"Expected score: {expected_score}, but" \
+        f" got {score}"
+    

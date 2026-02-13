@@ -59,24 +59,6 @@ def test_error_apon_setting_relaxed_structure():
     with pytest.raises(ValueError):
         oer_study.set_relaxed_structure(atoms_2)
 
-def test_error_apon_resetting_relaxed_structure():
-
-    dir_path = pathlib.Path(__file__).parent
-    ZrO2_m_path = dir_path / '../notebooks/ZrO2_m.cif'
-    atoms = read(ZrO2_m_path.resolve(), format='cif')
-
-    oer_study =OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
-
-    atoms_to_relax = oer_study.get_init_atoms()
-    oer_study.set_relaxed_structure(atoms_to_relax)
-
-    oer_study.predict_most_likely_surfaces()
-
-    with pytest.raises(RuntimeError):
-        oer_study.set_relaxed_structure(atoms_to_relax)
-
 # ______________________________________________________________________
 # ___ Testing of coordination number methods for study object __________
 # --- Testing coordination determination for bulk TiO2 rutile ----------
@@ -142,8 +124,7 @@ def test__set_bulk_coordination(TiO2_r_bulk):
             assert site.properties['bulk-custom-coord'] == 3
         else:
             raise ValueError("Unexpected element in structure")
-
-
+        
 # ----------------------------------------------------------------------
 # --- Testing coordination determination for bulk ZrO2 monoclinic ------
 @pytest.fixture(scope="module")
@@ -201,3 +182,21 @@ def test__determine_coordination_numbers_bulk_ZrO2_m_Oc(ZrO2_m_bulk):
             i += 1
 # ----------------------------------------------------------------------
 # ______________________________________________________________________
+
+
+@pytest.fixture(scope="module")
+def ZrO2_m_surfaces_predicted(ZrO2_m_bulk):
+    atoms, oer_study = ZrO2_m_bulk
+
+    atoms_to_relax = oer_study.get_init_atoms()
+    oer_study.set_relaxed_structure(atoms_to_relax)
+    oer_study.predict_most_likely_surfaces()
+    return oer_study
+
+def test_error_apon_resetting_relaxed_structure(
+        ZrO2_m_surfaces_predicted):
+    oer_study = ZrO2_m_surfaces_predicted
+
+    atoms_to_relax = oer_study.get_init_atoms()
+    with pytest.raises(RuntimeError):
+        oer_study.set_relaxed_structure(atoms_to_relax)

@@ -180,7 +180,7 @@ class OER_catalyst_study:
         atoms.set_pbc(True)
         cutoffs = natural_cutoffs(atoms)
         nl = NeighborList(cutoffs, self_interaction=False, 
-                          bothways=True, skin = 1e-5)
+                          bothways=True, skin = 1e-4)
         nl.update(atoms)
         return nl
 
@@ -260,7 +260,7 @@ class OER_catalyst_study:
             min_atoms: int = 20, 
             max_atoms: int = 120,
             vacuum: float = 1,
-            max_layers: int = 8,
+            max_layers: int = 6,
             **kwargs
             ) -> Atoms | None:
         """
@@ -371,7 +371,7 @@ class OER_catalyst_study:
         min_atoms: int = 20, 
         max_atoms: int = 120,
         vacuum: float = 1,
-        max_layers: int = 8,
+        max_layers: int = 6,
         ) -> None:
         """
         TEMP-DOC

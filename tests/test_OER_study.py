@@ -126,6 +126,24 @@ def test__determine_coordination_numbers_bulk_TiO2_r_Oc(TiO2_r_bulk):
         if atom.symbol == 'Ti':
             assert coords[atom.index] == 6
             i += 1
+
+# Testing that the correct bulk 'bulk-custom-coord' property is set:
+@pytest.mark.mini
+def test__set_bulk_coordination(TiO2_r_bulk):
+    atoms, oer_study = TiO2_r_bulk
+    m = 'all'
+    oer_study._set_bulk_coordination(method=m)
+
+    bulk_structure = oer_study.get_bulk_structure()
+    for site in bulk_structure.sites:
+        if site.species_string == 'Ti':
+            assert site.properties['bulk-custom-coord'] == 8
+        elif site.species_string == 'O':
+            assert site.properties['bulk-custom-coord'] == 3
+        else:
+            raise ValueError("Unexpected element in structure")
+
+
 # ----------------------------------------------------------------------
 # --- Testing coordination determination for bulk ZrO2 monoclinic ------
 @pytest.fixture(scope="module")

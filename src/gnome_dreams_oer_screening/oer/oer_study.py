@@ -214,7 +214,7 @@ class OER_catalyst_study:
         for index, atom in enumerate(atoms):
             if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
                                                   'O-coordination']:
-                cn = 0 # O atoms are ignored
+                coord_nums.append(0) # O atoms are ignored
             elif method == 'O-coordination':
 
                 indices, offsets = nl.get_neighbors(index)

@@ -21,6 +21,38 @@ def get_atoms_and_normal_from_input(input_surface: Atoms | Slab,
 
     return (atoms, normal_vector)
 
+def get_atom_projections_on_normal(input: Atoms | Slab,
+                            normal_vector: np.ndarray | None = None
+                            ) -> float:
+    
+    atoms, normal_vector = get_atoms_and_normal_from_input(input,
+                                                        normal_vector)
+    
+    pos = atoms.get_positions()
+    return np.dot(pos, normal_vector)
+
+def compute_slab_thickness(input: Atoms | Slab, 
+                            normal_vector: np.ndarray | None = None
+                            ) -> float:
+    projections = get_atom_projections_on_normal(
+        input, normal_vector)
+
+    slab_thickness = projections.max() - projections.min()
+    return slab_thickness
+
+def get_top_half_atom_projections(input: Atoms | Slab,
+        normal_vector: np.ndarray | None = None,
+        ) -> np.ndarray:
+    
+    projections = get_atom_projections_on_normal(
+        input, normal_vector)
+    
+    median_projection = np.median(projections)
+    indices = np.where(projections >= \
+                        median_projection)[0].astype(int)
+    
+    return indices
+
 # --- Stoichiometry utils ----------------------------------------------
 def get_stoichiometry_dict(input: Atoms | Structure) -> dict:
     if isinstance(input, Structure):

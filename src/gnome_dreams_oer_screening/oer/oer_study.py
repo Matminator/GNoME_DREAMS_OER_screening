@@ -13,8 +13,9 @@ from pymatgen.core.surface import (
 from ase.neighborlist import NeighborList, natural_cutoffs
 
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
-    get_atoms_and_normal_from_input, eval_stoichiometry_diff,
-    get_stoichiometry_diff, get_stoichiometry_dict
+    eval_stoichiometry_diff,get_stoichiometry_diff, 
+    get_stoichiometry_dict, compute_slab_thickness,
+    get_top_half_atom_projections
     )
 from gnome_dreams_oer_screening.oer.oer_surface_study import (
     OER_surface_study
@@ -288,7 +289,7 @@ class OER_catalyst_study:
                 continue
 
             # Test if slabs are thick enough, if not, retry:
-            thicknesses = [self._compute_slab_thickness(slab) for slab 
+            thicknesses = [compute_slab_thickness(slab) for slab 
                            in slabs]
             if np.min(thicknesses) < min_slab_thickness:
                 num_layers += 1
@@ -315,7 +316,7 @@ class OER_catalyst_study:
         # <<<< --------------------------------------------------------- MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]
         slabs = [slab for slab in slabs if 
-                    self._compute_slab_thickness(slab)
+                    compute_slab_thickness(slab)
                     <= max_slab_thickness]
         
         # Select slab with closest O stoichiometry to bulk, if enabled:
@@ -455,7 +456,7 @@ class OER_catalyst_study:
                     # Determine indices of the top half of atoms in the 
                     # surface:
                     top_half_indices = \
-                        self._get_top_half_atom_projections(
+                        get_top_half_atom_projections(
                             atoms, slab.normal)
 
                     # Get the corresponding bulk coordination numbers
@@ -555,34 +556,3 @@ class OER_catalyst_study:
             ) -> dict[int, OER_surface_study]:
         return self.oer_surface_studies
     
-    def _get_atom_projections_on_normal(self, input: Atoms | Slab,
-                               normal_vector: np.ndarray | None = None
-                               ) -> float:
-        
-        atoms, normal_vector = get_atoms_and_normal_from_input(input,
-                                                         normal_vector)
-        
-        pos = atoms.get_positions()
-        return np.dot(pos, normal_vector)
-
-    def _compute_slab_thickness(self, input: Atoms | Slab, 
-                               normal_vector: np.ndarray | None = None
-                               ) -> float:
-        projections = self._get_atom_projections_on_normal(
-            input, normal_vector)
-    
-        slab_thickness = projections.max() - projections.min()
-        return slab_thickness
-
-    def _get_top_half_atom_projections(self, input: Atoms | Slab,
-            normal_vector: np.ndarray | None = None,
-            ) -> np.ndarray:
-        
-        projections = self._get_atom_projections_on_normal(
-            input, normal_vector)
-        
-        median_projection = np.median(projections)
-        indices = np.where(projections >= \
-                            median_projection)[0].astype(int)
-        
-        return indices

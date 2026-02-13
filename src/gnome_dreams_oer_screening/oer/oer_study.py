@@ -337,8 +337,8 @@ class OER_catalyst_study:
                 dict_2 = get_stoichiometry_dict(slab)
                 diff_dict = get_stoichiometry_diff(dict_1, dict_2)
                 O_diff = abs(diff_dict.get('O', 0.0))
-                if np.abs(O_diff - min_O_stoichiometry_diff) \
-                    < 1/max_atoms:
+                if np.abs(O_diff) \
+                    < 0.01/len(slab) + min_O_stoichiometry_diff:
                     selected_slabs.append(slab)
 
             slabs = selected_slabs              

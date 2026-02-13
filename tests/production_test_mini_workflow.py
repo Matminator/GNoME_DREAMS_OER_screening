@@ -37,7 +37,7 @@ def waite_for_processe_to_finish(process_id):
             )
         if status in ['completed']:
             break
-        time.sleep(30*60)
+        time.sleep(20*60)
         iter += 1
     print('*'* 80)
 

@@ -45,6 +45,20 @@ def test_setup_2():
     assert energies['H2_gas_free_energy'] == -2
     assert energies['H2O_gas_free_energy'] == -4
 
+@pytest.mark.mini
+def test_error_apon_setting_relaxed_structure():
+
+    atoms_1 = Atoms('Ti', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
+    atoms_2 = Atoms('Fe', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
+
+    oer_study =OER_catalyst_study(
+        atoms_1, H2_gas_free_energy = -2, H2O_gas_free_energy = -4
+    )
+
+    assert oer_study.get_init_atoms() ==  atoms_1    
+    with pytest.raises(ValueError):
+        oer_study.set_relaxed_structure(atoms_2)
+
 def test_error_apon_resetting_relaxed_structure():
 
     dir_path = pathlib.Path(__file__).parent

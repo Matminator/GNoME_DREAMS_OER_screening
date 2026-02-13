@@ -78,7 +78,7 @@ class OER_surface_study:
         if fixed_bottom_half:
             pos = base_surface.get_positions()
             vertical_pos = pos @ surface_normal
-            z_center = np.mean(vertical_pos) # - .1  SLIGHT OFFSET !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            z_center = np.mean(vertical_pos)
             fixed_indices = [i for i, z in enumerate(vertical_pos) 
                              if z < z_center]
             base_surface.set_constraint(

@@ -115,6 +115,13 @@ class OER_catalyst_study:
                 "instance if you want to use a different relaxed bulk" \
                 " structure")
         
+        # Test if the relaxed bulk structure has the same composition:
+        if not eval_stoichiometry_diff(self.init_atoms, relaxed_bulk, 
+                                       max_diff = 1e-6):   
+            raise ValueError("The provided relaxed_bulk structure " \
+            "does not match the same composition as the initial " \
+            "bulk structure.")
+        
         if isinstance(relaxed_bulk, Atoms):
             self.bulk_structure = AseAtomsAdaptor.get_structure(
                 relaxed_bulk)

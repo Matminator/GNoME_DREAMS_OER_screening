@@ -265,7 +265,7 @@ class Job_handler():
             ad_sites_O_Gs = np.array(ad_sites_O_Gs, dtype=np.float64)
             ad_sites_O_Gs = ad_sites_O_Gs[~np.isnan(ad_sites_O_Gs)]
             over_pots.append(np.round(
-                                   (np.abs(ad_sites_O_Gs - 2.46)), 2))
+                                   (np.abs(ad_sites_O_Gs - 2.46)), 2)) # <<< -------- Needs to be able to handel NANS
         
         self.rframe.candidates[candidate_id].idealOverPotential \
             = min(over_pots)
@@ -379,7 +379,7 @@ class Job_handler():
                             raise NotImplementedError(f"Result processing "
                                 f"for job type {job_type} not implemented ")
                     
-                    self._update_ideal_over_pot(candt_id)
+                        self._update_ideal_over_pot(candt_id)
 
                 self.rframe.processes.df.at[idx, 'status'] = \
                     'completed'

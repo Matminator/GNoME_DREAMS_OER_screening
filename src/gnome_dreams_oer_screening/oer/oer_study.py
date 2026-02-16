@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/nfs/turbo/coe-venkvis/ziqiw-turbo/material_agent/GNoME_DREAMS_OER_screening/src/GNoME_DREAMS_OER_screening")
+# sys.path.append("/nfs/turbo/coe-venkvis/ziqiw-turbo/material_agent/GNoME_DREAMS_OER_screening/src/GNoME_DREAMS_OER_screening")
 
 import numpy as np
 import pandas as pd
@@ -15,7 +15,7 @@ from ase.neighborlist import NeighborList, natural_cutoffs
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
     eval_stoichiometry_diff,get_stoichiometry_diff, 
     get_stoichiometry_dict, compute_slab_thickness,
-    get_top_half_atom_projections
+    get_top_half_atom_projections, determine_coordination_numbers
     )
 from gnome_dreams_oer_screening.oer.oer_surface_study import (
     OER_surface_study
@@ -176,57 +176,60 @@ class OER_catalyst_study:
     def get_terminations_dict(self) -> dict[int, Slab]:
         return self.terminations.copy()
     
-    def _get_neighborlist(self, atoms: Atoms) -> NeighborList:
-        atoms.set_pbc(True)
-        cutoffs = natural_cutoffs(atoms)
-        nl = NeighborList(cutoffs, self_interaction=False, 
-                          bothways=True, skin = 1e-4)
-        nl.update(atoms)
-        return nl
+
+# --- DEPRECATED METHODS, TO BE REMOVED IN FUTURE VERSIONS -------------
+    # def _get_neighborlist(self, atoms: Atoms) -> NeighborList:
+    #     atoms.set_pbc(True)
+    #     cutoffs = natural_cutoffs(atoms)
+    #     nl = NeighborList(cutoffs, self_interaction=False, 
+    #                       bothways=True, skin = 1e-4)
+    #     nl.update(atoms)
+    #     return nl
 
 
-    def _determine_coordination_numbers(self, atoms: Atoms,
-                method: Literal['all', 'disregard-coord-of-O', 
-                'O-coordination']) -> list[int]:
-        """
-        Determine coordination numbers for all atoms in the given ASE
-        Atoms object, using the specified method. The method "all" gives
-        gives the corrdination numbers for all atoms given any neighbor,
-        "disregard-coord-of-O" gives the coordination numbers for all 
-        atoms excluding oxygen (sets oxygen coordination numbers to 
-        zero). "O-coordination" gives the coordination numbers for all
-        atoms considering only oxygen neighbors (also sets oxygen 
-        coordination numbers to zero).
-        Args:
-            atoms (Atoms): ASE Atoms object representing the structure.
-            method (str): Method to compute coordination numbers.
-                          Currently only 'coordination' is implemented.
-        Returns:
-            list[int]: List of coordination numbers for each atom.
-        """
+    # def _determine_coordination_numbers(self, atoms: Atoms,
+    #             method: Literal['all', 'disregard-coord-of-O', 
+    #             'O-coordination']) -> list[int]:
+    #     """
+    #     Determine coordination numbers for all atoms in the given ASE
+    #     Atoms object, using the specified method. The method "all" gives
+    #     gives the corrdination numbers for all atoms given any neighbor,
+    #     "disregard-coord-of-O" gives the coordination numbers for all 
+    #     atoms excluding oxygen (sets oxygen coordination numbers to 
+    #     zero). "O-coordination" gives the coordination numbers for all
+    #     atoms considering only oxygen neighbors (also sets oxygen 
+    #     coordination numbers to zero).
+    #     Args:
+    #         atoms (Atoms): ASE Atoms object representing the structure.
+    #         method (str): Method to compute coordination numbers.
+    #                       Currently only 'coordination' is implemented.
+    #     Returns:
+    #         list[int]: List of coordination numbers for each atom.
+    #     """
         
-        # Build neighbor list:
-        atoms_copy = atoms.copy()
-        atoms_copy.set_pbc(True)
-        # The only neighborlist that will be needed:
-        nl = self._get_neighborlist(atoms_copy)
+    #     # Build neighbor list:
+    #     atoms_copy = atoms.copy()
+    #     atoms_copy.set_pbc(True)
+    #     # The only neighborlist that will be needed:
+    #     nl = self._get_neighborlist(atoms_copy)
 
-        coord_nums = []
-        for index, atom in enumerate(atoms):
-            if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
-                                                  'O-coordination']:
-                coord_nums.append(0) # O atoms are ignored
-            elif method == 'O-coordination':
+    #     coord_nums = []
+    #     for index, atom in enumerate(atoms):
+    #         if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
+    #                                               'O-coordination']:
+    #             coord_nums.append(0) # O atoms are ignored
+    #         elif method == 'O-coordination':
 
-                indices, offsets = nl.get_neighbors(index)
-                indices = [i for i in indices if atoms[i].symbol == 'O']
+    #             indices, offsets = nl.get_neighbors(index)
+    #             indices = [i for i in indices if atoms[i].symbol == 'O']
 
-                coord_nums.append(len(indices)) # len(indices) = CN
-            else:
-                indices, offsets = nl.get_neighbors(index)
-                coord_nums.append(len(indices)) # len(indices) = CN
+    #             coord_nums.append(len(indices)) # len(indices) = CN
+    #         else:
+    #             indices, offsets = nl.get_neighbors(index)
+    #             coord_nums.append(len(indices)) # len(indices) = CN
                 
-        return coord_nums
+    #     return coord_nums
+# --- END OF DEPRECATED METHODS ----------------------------------------
     
     def _set_bulk_coordination(self, method: str) -> None:
         """
@@ -238,14 +241,21 @@ class OER_catalyst_study:
             method (str): Method to compute coordination numbers.
         """
         # Compute coordination numbers for bulk atoms, using the method
-        coord_numbers = self._determine_coordination_numbers(
+        coord_numbers = determine_coordination_numbers(
             self.bulk_atoms, method)
+        
+        if method != 'all':
+            coord_numbers_default = determine_coordination_numbers(
+                self.bulk_atoms, method='all')
+        else:
+            coord_numbers_default = coord_numbers.copy()
+
         # Store coordination numbers as a site property in the bulk 
         # structure:
         self.bulk_structure.add_site_property("bulk-custom-coord", 
                                               coord_numbers)
-
-
+        self.bulk_structure.add_site_property("bulk-default-coord",
+                                               coord_numbers_default)
 
     def _build_surfaces(self, 
             miller_indices: tuple[int, int, int],
@@ -470,7 +480,7 @@ class OER_catalyst_study:
 
                     # Get coordination numbers for top half of slab:
                     coords_numbers = np.array( \
-                    self._determine_coordination_numbers(
+                    determine_coordination_numbers(
                         atoms, method))[top_half_indices]
                 
                     corrd_diff = np.sum(coords_numbers - 

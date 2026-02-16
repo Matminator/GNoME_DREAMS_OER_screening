@@ -1,6 +1,8 @@
+from typing import Literal
 import numpy as np
 import warnings
 from ase import Atoms
+from ase.neighborlist import NeighborList, natural_cutoffs
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab, Structure
 
@@ -52,6 +54,55 @@ def get_top_half_atom_projections(input: Atoms | Slab,
                         median_projection)[0].astype(int)
     
     return indices
+
+# --- Coordination determination ---------------------------------------
+def determine_coordination_numbers(atoms: Atoms,
+            method: Literal['all', 'disregard-coord-of-O', 
+            'O-coordination']) -> list[int]:
+    """
+    Determine coordination numbers for all atoms in the given ASE
+    Atoms object, using the specified method. The method "all" gives
+    gives the corrdination numbers for all atoms given any neighbor,
+    "disregard-coord-of-O" gives the coordination numbers for all 
+    atoms excluding oxygen (sets oxygen coordination numbers to 
+    zero). "O-coordination" gives the coordination numbers for all
+    atoms considering only oxygen neighbors (also sets oxygen 
+    coordination numbers to zero).
+    Args:
+        atoms (Atoms): ASE Atoms object representing the structure.
+        method (str): Method to compute coordination numbers.
+                        Currently only 'coordination' is implemented.
+    Returns:
+        list[int]: List of coordination numbers for each atom.
+    """
+    
+    # Build neighbor list:
+    atoms_copy = atoms.copy()
+    atoms_copy.set_pbc(True)
+    # The only neighborlist that will be needed:
+    atoms_copy.set_pbc(True)
+    cutoffs = natural_cutoffs(atoms_copy)
+    nl = NeighborList(cutoffs, self_interaction=False, 
+                        bothways=True, skin = 1e-4)
+    nl.update(atoms_copy)
+
+    coord_nums = []
+    for index, atom in enumerate(atoms_copy):
+        if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
+                                                'O-coordination']:
+            coord_nums.append(0) # O atoms are ignored
+        elif method == 'O-coordination':
+
+            indices, offsets = nl.get_neighbors(index)
+            indices = [i for i in indices if atoms_copy[i].symbol == 'O']
+
+            coord_nums.append(len(indices)) # len(indices) = CN
+        else:
+            indices, offsets = nl.get_neighbors(index)
+            coord_nums.append(len(indices)) # len(indices) = CN
+            
+    return coord_nums
+# --- End Coordination determination -----------------------------------
 
 # --- Stoichiometry utils ----------------------------------------------
 def get_stoichiometry_dict(input: Atoms | Structure) -> dict:

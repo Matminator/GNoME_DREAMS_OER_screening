@@ -42,7 +42,7 @@ def determine_adsorption_sites(
                 input_surface: Slab,
                 normal_vector: np.ndarray | None = None,
                 top_layer_tol: float = 1.5,
-                only_reduced_coord_O_sites: bool = True
+                only_reduced_coord_O_sites: bool = False
                             ) -> pd.DataFrame:
 
     # Obtain the atoms object, given the Slab input:
@@ -83,7 +83,7 @@ def determine_adsorption_sites(
         if atom.tag != 1 and atom.symbol != 'O':
             continue
         if atom.symbol == 'O':
-            if atom_projections[atom.index] < top_layer_projection-0.25:
+            if atom_projections[atom.index] < top_layer_projection -0.2:
                 continue
 
         atom_pos = atom.position

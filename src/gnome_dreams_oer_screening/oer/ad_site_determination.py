@@ -78,6 +78,7 @@ def determine_adsorption_sites(
                     self_interaction=False, bothways=True, skin=1e-4)
     nl_extended.update(atoms)
     
+    cell = atoms.get_cell()
     for atom in atoms:
         if atom.tag != 1 and atom.symbol != 'O':
             continue
@@ -85,11 +86,14 @@ def determine_adsorption_sites(
             if atom_projections[atom.index] < top_layer_projection -0.5:
                 continue
 
+        atom_pos = atom.position
+
         indices, offsets = nl_extended.get_neighbors(atom.index)
         closest_neighbors = []
-        for i in indices:
+        for i, offset in zip(indices, offsets):
             neighbor_atom = atoms[i].symbol
-            distance = atoms.get_distance(atom.index, i, mic=True)
+            nb_pos = atoms[i].position + offset @ cell
+            distance = np.linalg.norm(atom_pos - nb_pos)
             closest_neighbors.append((neighbor_atom, distance))
 
         # Sort the closest neighbors by distance (closest first):
@@ -139,6 +143,31 @@ def determine_adsorption_sites(
                         'position': [atom.position],
                     })
                 ], ignore_index=True)
+
+    # Determine if any of the on-top sites are too close to any of the 
+    # slab atoms, and if so, remove them from the dataframe:
+    for i, row in df.iterrows():
+        if row['site type'] == 'on-top':
+            ad_site_pos = row['position']
+            atoms_copy = atoms.copy()
+            atoms_copy += Atoms('X', positions=[ad_site_pos])
+            atoms_copy.center(vacuum = 10.0, axis = 2)
+            x_index = len(atoms_copy) - 1
+            if atoms_copy[x_index].symbol != 'X':
+                raise ValueError('The ad site position was not added as an '
+                                'atom to the copied Atoms object.')
+            for atom in atoms_copy:
+                if atom.symbol == 'X':
+                    continue
+
+                distance = atoms_copy.get_distance(atom.index, x_index,
+                    mic=True)
+
+                if distance < 1.2:
+                    df.drop(i, inplace=True)
+                    break
+
+
 
     for energy_col in ['G_approx(O)', 'G(O)', 'G_approx(OH)', 
                         'G(OH)', 'G_approx(OOH)', 'G(OOH)']:

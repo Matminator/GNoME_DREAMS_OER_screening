@@ -61,7 +61,7 @@ def test_error_apon_setting_relaxed_structure():
         oer_study.set_relaxed_structure(atoms_2)
 # --- End of initilization tests of the OER_catalyst_study class: ------
 
-#
+# --- TEMP TITEL... 
 @pytest.fixture(scope="module")
 def TiO2_r_bulk():
     dir_path = pathlib.Path(__file__).parent

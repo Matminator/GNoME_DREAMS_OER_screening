@@ -540,35 +540,35 @@ class OER_catalyst_study:
     def _get_init_adsorption_sites(self, 
             termination_index: int,
             top_layer_tol: float = 1.5,
-            only_reduced_coord_O_sotes: bool = True
+            only_reduced_coord_O_sites: bool = True
             ) -> (pd.DataFrame, Atoms):
         return determine_adsorption_sites(
             self.terminations[termination_index],
             top_layer_tol=top_layer_tol,
-            only_reduced_coord_O_sotes = only_reduced_coord_O_sotes
+            only_reduced_coord_O_sites = only_reduced_coord_O_sites
         )
     
     def get_init_adsorption_sites_atoms(self, 
             termination_index: int,
             top_layer_tol: float = 1.5,
-            only_reduced_coord_O_sotes: bool = True
+            only_reduced_coord_O_sites: bool = True
             ) -> Atoms:
         _, atoms = self._get_init_adsorption_sites(
             termination_index=termination_index,
             top_layer_tol=top_layer_tol,
-            only_reduced_coord_O_sotes=only_reduced_coord_O_sotes
+            only_reduced_coord_O_sites = only_reduced_coord_O_sites
         )
         return atoms
 
-    def get_init_adsorption_site_df(self, 
+    def get_init_adsorption_sites_df(self, 
             termination_index: int,
             top_layer_tol: float = 1.5,
-            only_reduced_coord_O_sotes: bool = True
+            only_reduced_coord_O_sites: bool = True
             ) -> pd.DataFrame:
         df, _ = self._get_init_adsorption_sites(
             termination_index=termination_index,
             top_layer_tol=top_layer_tol,
-            only_reduced_coord_O_sotes=only_reduced_coord_O_sotes
+            only_reduced_coord_O_sites = only_reduced_coord_O_sites
         )
         return df
     

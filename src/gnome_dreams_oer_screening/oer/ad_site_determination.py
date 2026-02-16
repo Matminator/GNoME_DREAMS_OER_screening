@@ -154,8 +154,8 @@ def determine_adsorption_sites(
             atoms_copy.center(vacuum = 10.0, axis = 2)
             x_index = len(atoms_copy) - 1
             if atoms_copy[x_index].symbol != 'X':
-                raise ValueError('The ad site position was not added as an '
-                                'atom to the copied Atoms object.')
+                raise ValueError('The ad site position was not added ' \
+                    'as an atom to the copied Atoms object.')
             for atom in atoms_copy:
                 if atom.symbol == 'X':
                     continue
@@ -166,8 +166,6 @@ def determine_adsorption_sites(
                 if distance < 1.2:
                     df.drop(i, inplace=True)
                     break
-
-
 
     for energy_col in ['G_approx(O)', 'G(O)', 'G_approx(OH)', 
                         'G(OH)', 'G_approx(OOH)', 'G(OOH)']:

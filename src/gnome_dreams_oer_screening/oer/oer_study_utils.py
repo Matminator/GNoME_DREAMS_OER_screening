@@ -7,11 +7,12 @@ from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab, Structure
 
 
-def get_atoms_and_normal_from_input(input_surface: Atoms | Slab, 
-                normal_vector: np.ndarray | None = None
-                ) -> tuple[Atoms, np.ndarray]:
+def get_atoms_and_normal_from_input(
+        input_surface: Atoms | Structure | Slab, 
+        normal_vector: np.ndarray | None = None
+        ) -> tuple[Atoms, np.ndarray]:
         
-    if isinstance(input_surface, Slab):
+    if isinstance(input_surface, (Structure, Slab)):
         atoms = AseAtomsAdaptor.get_atoms(input_surface)
         if normal_vector is None:
             normal_vector = input_surface.normal

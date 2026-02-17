@@ -1,8 +1,14 @@
+
 import os
 from pathlib import Path
+from time import time
+import numpy as np
+from typing import Literal
 
 from ase import Atoms
-from ase.io import read
+from ase.io import read, Trajectory
+from pymatgen.core.surface import Structure
+from pymatgen.io.ase import AseAtomsAdaptor
 
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
@@ -23,6 +29,8 @@ from custodian.vasp.handlers import (
     WalltimeHandler
 )
 
+from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
+    RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet)
 
 def run_vasp_via_custodian(
                 directory, 
@@ -79,7 +87,9 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     structures from the VASP calculation.
     """
 
-    atoms_list = read(directory + "/vasprun.xml", index=":")
+    directory = Path(directory)  # Ensure directory is a Path object
+
+    atoms_list = read(directory / "vasprun.xml", index=":")
 
     if return_only_final:
         out = [atoms_list[-1]]
@@ -116,4 +126,96 @@ def clean_up_vasp_directory(
             if file.is_file():
                 file.unlink()
         except Exception as e:
-            print(f"Could not remove {file}: {e}")
+            pass
+
+
+def save_fake_results_to_traj(directory: Path, atoms: Atoms):
+    out_traj = Trajectory(directory / "fake_result.traj", "w")
+    out_traj.write(atoms)
+    out_traj.close()
+    
+
+class calculational_setup():
+
+    def __init__(self, 
+                 mode: Literal['test', 'production_test', 'production'] 
+                 = 'production',
+                 bulk_set = RPBE_relax_bulk_set,
+                 surface_set = RPBE_relax_surface_set
+                 ) -> None:
+        self.mode = mode
+
+        # Setup of test modes:
+        if mode == 'production_test':
+            self.bulk_set = TestRelaxSet
+            self.surface_set = TestRelaxSet
+        else:
+            self.bulk_set = bulk_set
+            self.surface_set = surface_set
+
+    def bulk_relaxation(self, structure: Structure, directory: Path
+                        ) -> None:
+        vasp_set = self.bulk_set(structure = structure, 
+                                 sort_structure = False)
+        vasp_set.write_input(directory, potcar_spec = False if 
+                             'production' in self.mode else True)
+        
+        if 'test' in self.mode:
+            atoms = AseAtomsAdaptor.get_atoms(structure)
+            fake_energy = len(atoms)
+            atoms[0].charge = fake_energy  # just to store energy
+            save_fake_results_to_traj(directory, atoms)
+        
+    def surface_relaxation(self, structure: Structure, directory: Path
+                           ) -> None:
+        vasp_set = self.surface_set(structure = structure, 
+                                    sort_structure = False)
+        vasp_set.write_input(directory, potcar_spec = False if 
+                             'production' in self.mode else True)
+        
+        if 'test' in self.mode:
+            atoms = AseAtomsAdaptor.get_atoms(structure)
+
+            K_O = 0.070 + (-6.77) - (-14.217)
+            K_OH = 0.361 + (-6.77)/2 - (-14.217)
+            x = 2.46 - K_O
+            y = 1.23 - 2*x + K_OH
+            
+            random_factor = np.random.normal(loc = 0, scale = 1)
+
+            # Fake energy calculation:
+            if 'H' in atoms.symbols:
+                fake_energy = x * len(atoms) - y + random_factor
+            else:
+                fake_energy = x * len(atoms) + random_factor
+
+            atoms[0].charge = fake_energy  # just to store energy
+            save_fake_results_to_traj(directory, atoms)
+
+
+    
+
+
+
+"""
+NOTE FOR FUTURE:
+
+Initial structure
+       |
+       v
+Static SCF (ISMEAR=0, SIGMA=0.05)
+       |
+       v
+Handlers check:
+   - LargeSigmaHandler
+   - IncorrectSmearingHandler
+       |
+       v
+Determine electronic type:
+   - Metal -> ISMEAR=1/2, SIGMA=0.2
+   - Insulator -> ISMEAR=-5
+       |
+       v
+Relaxation calculation (NSW>0)
+
+"""

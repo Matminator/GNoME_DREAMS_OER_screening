@@ -5,8 +5,8 @@ from pymatgen.io.vasp.sets import VaspInputSet
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.vasp import Kpoints as VaspKpoints
 
-from GNoME_DREAMS_OER_screening.vasp.test_relaxset import get_pre_defined_settings
-from GNoME_DREAMS_OER_screening.vasp.RPBE_relax_sets import (
+from gnome_dreams_oer_screening.vasp.dummy_sets import get_dummy_settings # material_agent.GNoME_DREAMS_OER_screening.src. ...
+from gnome_dreams_oer_screening.vasp.rpbe_relax_sets import (
     get_RPBE_bulk_settings, get_RPBE_surface_settings
     )   
 
@@ -91,4 +91,9 @@ class TestRelaxSet(VaspInputSet):
             the inputs are generated.
         **kwargs: Keywords supported by VaspInputSet.
     """
-    CONFIG = get_pre_defined_settings()
+    CONFIG = get_dummy_settings()
+    def __init__(self, structure, **kwargs):
+        self.CONFIG["KPOINTS"] = heuristic_compute_kpoints(
+            structure, structure_type='N/A', kpts_nominator=0.01
+            )
+        super().__init__(structure=structure, **kwargs)

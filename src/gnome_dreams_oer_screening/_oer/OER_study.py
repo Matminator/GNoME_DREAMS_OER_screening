@@ -13,38 +13,11 @@ from pymatgen.core.surface import (
     Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-from GNoME_DREAMS_OER_screening.OER.OER_study_utils import get_atoms_and_normal_from_input
-from GNoME_DREAMS_OER_screening.OER.OER_surface_study import OER_surface_study
+from _oer.OER_study_utils import get_atoms_and_normal_from_input
+from _oer.OER_surface_study import OER_surface_study
 
 
 class OER_catalyst_study:
-    """
-    The core class for managing for ranking and generating surfaces from
-    a bulk structure, for the purpose of OER catalyst screening. All 
-    data related to computation of adsorption energies is stored in this
-    class. Surfaces are initialized as OER_surface_study instances, via 
-    the method 'initialize_OER_surface_studies', and stored in a 
-    dictionary, with miller indices as keys. Surface structures with 
-    adsorbates are managed in the OER_surface_study instances. Gas phase
-    free energies of H2O, H2, O2 are stored in this class, in addition 
-    to initial corrections (correction = ZPE + Cp - TS) to be applied to
-    adsorption energies.
-
-    Args:
-        bulk (Atoms): Bulk structure of the catalyst material.
-        H2O_gas_free_energy (float): Free energy of H2O in gas phase.
-        H2_gas_free_energy (float): Free energy of H2 in gas phase.
-        O2_gas_free_energy (float, optional): Free energy of O2 in gas
-        phase.
-        default_O_ad_correction (float, optional): Default correction
-        made to the DFT O* adsorption energy.
-        default_OH_ad_correction (float, optional): Default correction
-        made to the DFT OH* adsorption energy.
-        default_OOH_ad_correction (float, optional): Default correction
-        made to the DFT OOH* adsorption energy.
-        bulk_energy (float, optional): Energy of the bulk structure.
-    """
-
 
     def __init__(self, bulk = Atoms,    
                  H2O_gas_free_energy = float,
@@ -66,6 +39,12 @@ class OER_catalyst_study:
         else:
             self.bulk_energy = bulk_energy
 
+        self.max_miller = None
+        self.distinct_millers = None
+        self.df_millers_ranking = None
+
+        self.OER_surface_studies = {}
+
         self.species_energies = {
             'H2O_gas_free_energy': H2O_gas_free_energy,
             'H2_gas_free_energy': H2_gas_free_energy,
@@ -75,24 +54,15 @@ class OER_catalyst_study:
             'OOH_ad_correction': default_OOH_ad_correction,
         }
 
-        self.max_miller = None
-        self.distinct_millers = None
-        self.df_millers_ranking = None
-        self.OER_surface_studies = {}
-
         # --- symmetrize slabs when generating? ---
         # Currently always unknown if True or False is better. False 
         # is faster and more robust, but True might give better slabs...
         self.symmetrize_slabs = False 
 
-
-    def set_energies(self,
+    def set_gas_energies(self,
             H2O_gas_free_energy: float = None,
             H2_gas_free_energy: float = None,
-            O2_gas_free_energy: float = None,
-            O_ad_correction: float = None,
-            OH_ad_correction: float = None,
-            OOH_ad_correction: float = None,
+            O2_gas_free_energy: float = None
             ) -> None:
         if H2O_gas_free_energy is not None:
             self.species_energies['H2O_gas_free_energy'] = H2O_gas_free_energy
@@ -100,6 +70,12 @@ class OER_catalyst_study:
             self.species_energies['H2_gas_free_energy'] = H2_gas_free_energy
         if O2_gas_free_energy is not None:
             self.species_energies['O2_gas_free_energy'] = O2_gas_free_energy
+    
+    def set_default_adsorption_corrections(self,
+            O_ad_correction: float = None,
+            OH_ad_correction: float = None,
+            OOH_ad_correction: float = None,
+            ) -> None:
         if O_ad_correction is not None:
             self.species_energies['O_ad_correction'] = O_ad_correction
         if OH_ad_correction is not None:
@@ -109,9 +85,6 @@ class OER_catalyst_study:
 
     def get_gas_and_energy_corrections(self) -> dict[str, float]:
         return self.species_energies.copy()
-
-    def get_bulk_structure(self) -> Atoms:
-        return self.bulk_atoms.copy()
 
     def _determine_coordination_numbers(self, atoms: Atoms,
                 method: Literal['coordination', 'non-O-coordination']
@@ -186,6 +159,7 @@ class OER_catalyst_study:
     def get_df_with_surface_rankings(self) -> pd.DataFrame:
         return self.df_millers_ranking.copy()
         
+
     def predict_most_likely_surfaces(self, 
         method: Literal['coordination', 'non-O-coordination'],
         stoichiometry: Literal['stoichiometric', 'O-stoichiometric',

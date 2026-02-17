@@ -13,8 +13,12 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "pymatgen", "ase", "pandas", "numpy", "seaborn", "custodian"
+    "pymatgen", "ase", "pandas", "numpy", "seaborn", "custodian", 
+    "pytest>=7", "pysqa"
 ]
+
+# [project.optional-dependencies]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -22,12 +26,16 @@ where = ["src"]
 [project.urls]
 "Homepage" = "https://github.com/Matminator/GNoME_DREAMS_OER_screening"
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=7"
-]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+filterwarnings = [
+    "ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib.*"
+]
+
+markers = [
+    "mini: marks fast tests for quick runs"
+]

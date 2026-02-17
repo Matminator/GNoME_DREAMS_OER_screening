@@ -265,8 +265,5 @@ class OER_surface_study:
 
     def get_adsorption_sites_df(self) -> pd.DataFrame:
         if self.add_sites_df_relaxed is None:
-            raise ValueError("No relaxed adsorption sites have" \
-            " been determined yet. They need to be set by " \
-            "calling 'determine_adsorption_sites' method with " \
-            "use_relaxed_surface=True.")
+            return None
         return self.add_sites_df_relaxed.copy()

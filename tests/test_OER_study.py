@@ -102,8 +102,6 @@ def test__set_bulk_coordination(TiO2_r_bulk):
         else:
             raise ValueError("Unexpected element in structure")
 
-
-
 @pytest.fixture(scope="module")
 def TiO2_r_surfaces_predicted_O_coordination(TiO2_r_bulk):
     atoms, oer_study_not_used = TiO2_r_bulk

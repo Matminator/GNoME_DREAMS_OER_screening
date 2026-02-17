@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
 import warnings
 from ase import Atoms
@@ -8,8 +9,12 @@ from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab
 
-from gnome_dreams_oer_screening.oer.oer_study_utils import get_atoms_and_normal_from_input
-from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import OER_adsorption_site_study
+from gnome_dreams_oer_screening.oer.oer_study_utils import (
+    get_atoms_and_normal_from_input)
+from gnome_dreams_oer_screening.oer.ad_site_determination import (
+    determine_adsorption_sites)
+from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import (
+    OER_adsorption_site_study)
 
 class OER_surface_study:
     """
@@ -50,27 +55,38 @@ class OER_surface_study:
             True.
         vacuum: float
             The amount of vacuum (in Ångstrom) to add to the surface.
-            Default is 8 Ångstrom.
+            Default is 14 Ångstrom.
     """
     
 
     def __init__(self, 
                  OER_catalyst_study,
-                 input_surface: Atoms | Slab,
+                 input_surface: Slab,
                  normal_vector: np.ndarray | None = None,
-                 fixed_bottom_half: bool = True, vacuum: float = 12
+                 fixed_bottom_half: bool = True, vacuum: float = 14
                  ):
-    
+
         # Make sure that the surfaces is on the form of an ASE Atoms 
         # object and an np.array contaning the normal vector:
         base_surface, surface_normal = get_atoms_and_normal_from_input(
                                             input_surface, normal_vector
                                             )
+
         assert np.isclose(
             np.linalg.norm(surface_normal), 1.0, atol=1e-5
             ), "Surface normal vector must be normalized."
         self.surface_normal = surface_normal
         self.OER_catalyst_study = OER_catalyst_study
+
+        # Save original slab - to store site atributes:
+        self.original_slab = input_surface.copy()
+
+        # Initialize properties list:
+        self.site_properties = [{} for _ in range(len(input_surface))]
+        input_site_properties = input_surface.site_properties
+        self._add_site_data('bulk-default-coord', 
+                           input_site_properties['bulk-default-coord']
+                           )
         
         # Add vacuum to and center the surface:
         base_surface.center(vacuum=vacuum, axis=2)
@@ -78,7 +94,7 @@ class OER_surface_study:
         if fixed_bottom_half:
             pos = base_surface.get_positions()
             vertical_pos = pos @ surface_normal
-            z_center = np.mean(vertical_pos)
+            z_center = np.median(vertical_pos)
             fixed_indices = [i for i, z in enumerate(vertical_pos) 
                              if z < z_center]
             base_surface.set_constraint(
@@ -93,7 +109,6 @@ class OER_surface_study:
         self.relaxed_surface_add_sites_studies = {}
         self.non_relaxed_surface_add_sites_studies = {}
 
-
     def get_non_relaxed_surface(self) -> Atoms:
         return self.base_surface_non_relaxed.copy()
 
@@ -103,7 +118,6 @@ class OER_surface_study:
                              "yet. It needs to be set by calling " \
                                 "'set_relaxed_base_surface' method.")
         return self.base_surface_relaxed.copy()
-
 
     def set_relaxed_base_surface(self, surface: Atoms, 
                                  energy: float | None = None) -> None:
@@ -117,162 +131,74 @@ class OER_surface_study:
             except:
                 raise ValueError("Energy not provided and could not " \
                                  "be obtained from the relaxed atoms")
+            
+    def _add_site_data(self, 
+            property_name: str,
+            properties: list,
+            indices: list[int] | NDArray[np.int_] | None = None
+            ) -> None:
+        
+        if indices is None:
+            indices = range(len(self.original_slab))
+
+        for i, prop in zip(indices, properties):
+            self.site_properties[i][property_name] = prop
 
 
-    def determine_adsorption_sites(self, top_layer_tol: float = 1.5,
-                                  use_relaxed_surface: bool = True):
-        if use_relaxed_surface and self.add_sites_df_relaxed is not None:
+    def determine_adsorption_sites(self, 
+            top_layer_tol: float = 1.5,
+            only_reduced_coord_O_sites: bool = False
+            ) -> None:
+        
+        if self.add_sites_df_relaxed is not None:
             raise ValueError("Adsorption sites for the relaxed " \
             "surface have already been determined And may not be " \
             "overwritten.")
-        if not use_relaxed_surface and self.add_sites_df_non_relaxed is not None:
-            raise ValueError("Adsorption sites for the non-relaxed" \
-            " surface have already been determined And may not be " \
-            "overwritten.")
-
-        if use_relaxed_surface and self.base_surface_relaxed is None:
+        if self.base_surface_relaxed is None:
             raise ValueError("No relaxed surface has been provided " \
             "yet. It needs to be set by calling " \
             "'set_relaxed_base_surface' method.")
         
-        if use_relaxed_surface:
-            surface = self.base_surface_relaxed.copy()
-            self.add_sites_df_relaxed = self._determine_adsorption_sites(
-                surface, top_layer_tol)
-        else:
-            surface = self.base_surface_non_relaxed.copy()
-            self.add_sites_df_non_relaxed = self._determine_adsorption_sites(
-                surface, top_layer_tol)
+        structrue = AseAtomsAdaptor.get_structure(
+            self.base_surface_relaxed)
+        
+        structrue.add_site_property('bulk-default-coord',
+                                    self.original_slab.site_properties\
+                                    ['bulk-default-coord'])
     
-    def _determine_adsorption_sites(self, surface: Atoms,
-                                    top_layer_tol: float = 1.5):
+        df, atoms = determine_adsorption_sites(
+            structrue,
+            normal_vector = self.surface_normal,
+            top_layer_tol = top_layer_tol,
+            only_reduced_coord_O_sites = only_reduced_coord_O_sites
+            )
         
-
-# THERE NEEDS TO BE IMPLIMENTED A MOR SOFISTICATED WAY OF DETERMINING ADSORPTION SITES !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# This could for instance invlove using neighbor lists to find close naiboring atoms etc.
-
-
-        # Determining top metal (non-O) layer:
-        metal_indices = [i for i, atom in enumerate(surface) 
-                         if atom.symbol != 'O']
-        metal_pos = surface.get_positions()
-        metal_vertical_pos = metal_pos @ self.surface_normal
-        top_metals = np.max(metal_vertical_pos[metal_indices])
-        top_metal_indices = [i for i in metal_indices 
-                             if metal_vertical_pos[i] >= 
-                             top_metals - top_layer_tol]
+        df.insert(loc=0, column='Site index', value=df.index)
         
-        df = pd.DataFrame(columns=['site type', 'add site element', 
-                                   'position'])
-        for top_metal_index in top_metal_indices:
-            element = surface[top_metal_index].symbol
-            top_metal_pos = metal_pos[top_metal_index]
+        tags = [atom.tag for atom in atoms]
+        for atom, tag in zip(self.base_surface_relaxed, tags):
+            atom.tag = tag
+        self._add_site_data('tag', tags)
+        self.add_sites_df_relaxed = df
 
-            init_bond_length = natural_cutoffs(Atoms(element))[0]
-            init_bond_length += natural_cutoffs(Atoms('O'))[0]
-            ad_site_pos = self.surface_normal * init_bond_length
-            ad_site_pos += top_metal_pos
-            
-            df = pd.concat([
-                df,
-                pd.DataFrame({
-                    'site type': ['on-top'],
-                    'add site element': [element],
-                    'position': [ad_site_pos],
-                })
-            ], ignore_index=True)
-
-        for energy_col in ['G_approx(O)', 'G(O)', 'G_approx(OH)', 
-                           'G(OH)', 'G_approx(OOH)', 'G(OOH)']:
-            df[energy_col] = None
-            
-        return df        
-
-    def get_base_surface(self, relaxed_surface: bool = True,
-                     include_adsorption_sites: bool = False,
-                     use_adsorbate: str = "X"):
-        if relaxed_surface and self.base_surface_relaxed is None:
-            raise ValueError("No relaxed surface has been provided " \
-                             "yet. It needs to be set by calling " \
-                                "'set_relaxed_base_surface' method.")
-        if relaxed_surface:
-            surface = self.base_surface_relaxed.copy()
-        else:
-            surface = self.base_surface_non_relaxed.copy()
-            
-        if include_adsorption_sites:
-            if relaxed_surface:
-                if self.add_sites_df_relaxed is None:
-                    raise ValueError("adsorbtion sites have not been " \
-                    "determined yet")
-                df = self.add_sites_df_relaxed.copy()
-            else:
-                if self.add_sites_df_non_relaxed is None:
-                    raise ValueError("adsorbtion sites have not been " \
-                    "determined yet")
-                df = self.add_sites_df_non_relaxed.copy()
-
-        # Adding adsorption sites if requested:
-        if include_adsorption_sites:
-            for _, row in df.iterrows():
-                position = row['position']
-                ad_atom = Atoms(use_adsorbate, positions=[position])
-                surface += ad_atom
-
-        return surface
-
-    def view_base_surface(self, relaxed_surface: bool = True,
-                     include_adsorption_sites: bool = False,
-                     use_adsorbate: str = "X"):
-        surface = self.get_base_surface(
-            relaxed_surface, include_adsorption_sites, use_adsorbate
-        )
-        view(surface, viewer='x3d')
-        
     
-
-    def initialize_adsorption_site_study(self, index: int,
-                                         relaxed_surface: bool = True
-                                         ):
-        if relaxed_surface:
-            if self.add_sites_df_relaxed is None:
-                raise ValueError("No adsorption sites have been " \
-                "determined for the relaxed surface yet. They " \
-                "need to be set by calling " \
-                "'determine_adsorption_sites'")
-            if index in self.relaxed_surface_add_sites_studies:
-                raise ValueError("Adsorption site study for index " \
-                f"{index} on the relaxed surface has already " \
-                "been initialized.")
-            
-            self.relaxed_surface_add_sites_studies[index] = \
-                OER_adsorption_site_study(
-                    self.base_surface_relaxed.copy(),
-                    self.add_sites_df_relaxed.loc[index, 'position'],
-                    index
-                )
-
-        if not relaxed_surface:
-            if self.add_sites_df_non_relaxed is None:
-                raise ValueError("No adsorption sites have been " \
-                "determined for the non-relaxed surface yet. " \
-                "They need to be set by calling " \
-                "'determine_adsorption_sites'")
-            if index in self.non_relaxed_surface_add_sites_studies:
-                raise ValueError("Adsorption site study for index " \
-                f"{index} on the non-relaxed surface has already " \
-                "been initialized.")
-
-            warnings.warn("\n Warning: For calculating adsorption " \
-            "energies it is recommended to use relaxed surfaces only.",
-            UserWarning)
-            
-            self.non_relaxed_surface_add_sites_studies[index] = \
-                OER_adsorption_site_study(
-                self.base_surface_non_relaxed.copy(),
-                self.add_sites_df_non_relaxed.loc[index, 'position'],
+    def initialize_adsorption_site_study(self, index: int) -> None:
+        if self.add_sites_df_relaxed is None:
+            raise ValueError("No adsorption sites have been " \
+            "determined for the relaxed surface yet. They " \
+            "need to be set by calling 'determine_adsorption_sites'")
+        if index in self.relaxed_surface_add_sites_studies:
+            raise ValueError("Adsorption site study for index " \
+            f"{index} on the relaxed surface has already been " \
+            "initialized.")
+        
+        self.relaxed_surface_add_sites_studies[index] = \
+            OER_adsorption_site_study(
+                self.base_surface_relaxed.copy(),
+                self.add_sites_df_relaxed.loc[index, 'position'],
                 index
-                )
+            )
+        
             
     def update_adsorption_energies(self):
         if self.add_sites_df_relaxed is None:
@@ -337,15 +263,10 @@ class OER_surface_study:
         else:
             return self.non_relaxed_surface_add_sites_studies
 
-    def get_adsorption_sites_df(self, relaxed_surface: bool = True
-                                ) -> pd.DataFrame:
-        if relaxed_surface:
-            if self.add_sites_df_relaxed is None:
-                raise ValueError("No relaxed adsorption sites have" \
-                " been determined yet. They need to be set by " \
-                "calling 'determine_adsorption_sites' method with " \
-                "use_relaxed_surface=True.")
-            df = self.add_sites_df_relaxed.copy()
-        else:
-            df = self.add_sites_df_non_relaxed.copy()
-        return df
+    def get_adsorption_sites_df(self) -> pd.DataFrame:
+        if self.add_sites_df_relaxed is None:
+            raise ValueError("No relaxed adsorption sites have" \
+            " been determined yet. They need to be set by " \
+            "calling 'determine_adsorption_sites' method with " \
+            "use_relaxed_surface=True.")
+        return self.add_sites_df_relaxed.copy()

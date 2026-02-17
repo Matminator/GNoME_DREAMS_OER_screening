@@ -40,7 +40,7 @@ def test_sites_are_found(test_cands_traj):
     slab = list(study.terminations.values())[0]
 
     df, atoms = determine_adsorption_sites(slab,
-        only_reduced_coord_O_sotes = True
+        only_reduced_coord_O_sites = True
     )
 
     assert len(df) > 0, "No adsorption sites were determined"
@@ -62,7 +62,7 @@ def test_site_distances(test_cands_traj):
     slab = list(study.terminations.values())[0]
 
     df, atoms = determine_adsorption_sites(slab,
-        only_reduced_coord_O_sotes = True
+        only_reduced_coord_O_sites = True
     )
 
     assert len(df) > 2

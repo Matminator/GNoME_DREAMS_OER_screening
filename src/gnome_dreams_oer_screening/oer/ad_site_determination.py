@@ -4,16 +4,20 @@ import pandas as pd
 from ase import Atoms
 from ase.neighborlist import NeighborList, natural_cutoffs
 from pymatgen.core.surface import Slab, Structure
+from pymatgen.io.ase import AseAtomsAdaptor
 
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
     get_atoms_and_normal_from_input, get_atom_projections_on_normal,
     determine_coordination_numbers
 )
 
-def determine_surface_plane(input_surface: Atoms | Slab,
+def determine_surface_plane(input_surface: Structure | Slab,
                             normal_vector: np.ndarray | None = None,
                             top_layer_tol: float = 1.5
                             ) -> Atoms:
+    
+    assert isinstance(input_surface, (Structure, Slab)), \
+        "Input surface must be a pymatgen Structure or Slab object."
 
     # Make sure that the surfaces is on the form of an ASE Atoms 
     # object and an np.array contaning the normal vector:
@@ -21,6 +25,9 @@ def determine_surface_plane(input_surface: Atoms | Slab,
                                         input_surface, normal_vector
                                         )
     
+    if not isinstance(atoms, Atoms):
+        raise ValueError("NOT AN ATOMS OBJECT")
+
     # Determining top metal (non-O) layer:
     metal_indices = [i for i, atom in enumerate(atoms) 
                         if atom.symbol != 'O']
@@ -39,7 +46,7 @@ def determine_surface_plane(input_surface: Atoms | Slab,
     return atoms
 
 def determine_adsorption_sites(
-                input_surface: Slab,
+                input_surface: Slab | Atoms,
                 normal_vector: np.ndarray | None = None,
                 top_layer_tol: float = 1.5,
                 only_reduced_coord_O_sites: bool = False

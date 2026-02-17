@@ -155,7 +155,8 @@ class calculational_setup():
 
     def bulk_relaxation(self, structure: Structure, directory: Path
                         ) -> None:
-        vasp_set = self.bulk_set(structure = structure)
+        vasp_set = self.bulk_set(structure = structure, 
+                                 sort_structure = False)
         vasp_set.write_input(directory, potcar_spec = False if 
                              'production' in self.mode else True)
         
@@ -167,7 +168,8 @@ class calculational_setup():
         
     def surface_relaxation(self, structure: Structure, directory: Path
                            ) -> None:
-        vasp_set = self.surface_set(structure = structure)
+        vasp_set = self.surface_set(structure = structure, 
+                                    sort_structure = False)
         vasp_set.write_input(directory, potcar_spec = False if 
                              'production' in self.mode else True)
         

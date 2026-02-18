@@ -124,7 +124,7 @@ def determine_adsorption_sites(
                     'ad site neighboring elements': [closest_neighbors],
                     'reduced coordination': 'N/A',
                     'position': [ad_site_pos],
-
+                    'atom_index': [atom.index]
                 })
             ], ignore_index=True)
 
@@ -148,6 +148,7 @@ def determine_adsorption_sites(
                         'reduced coordination':
                             [reduced_coord],
                         'position': [atom.position],
+                        'atom_index': [atom.index]
                     })
                 ], ignore_index=True)
 
@@ -175,7 +176,8 @@ def determine_adsorption_sites(
                     break
 
     for energy_col in ['G_approx(O)', 'G(O)', 'G_approx(OH)', 
-                        'G(OH)', 'G_approx(OOH)', 'G(OOH)']:
+                        'G(OH)', 'G_approx(OOH)', 'G(OOH)',
+                        'ideal overpotential']:
         df[energy_col] = None
         
     return df, atoms  

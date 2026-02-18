@@ -121,7 +121,19 @@ class OER_surface_study:
 
     def set_relaxed_base_surface(self, surface: Atoms, 
                                  energy: float | None = None) -> None:
-        self.base_surface_relaxed = surface
+        
+        if len(surface) != len(self.base_surface_non_relaxed):
+            raise ValueError("This is not the correct relaxed surface" \
+                "The provided surface has a different number of atoms" \
+                f" than the non-relaxed surface, namly {len(surface)}" \
+                f" instead of {len(self.base_surface_non_relaxed)}.")
+        
+        for i in range(len(surface)):
+            if surface[i].symbol != self.base_surface_non_relaxed[i].symbol:
+                raise ValueError("The provided surfaces is either not "\
+                    "the correct relaxed surface or the order of the " \
+                    "atoms is different. BOTH ARE CRITICAL ISSUES.")
+
         if energy is not None:
             self.relaxed_surface_energy = energy
         else:
@@ -131,6 +143,8 @@ class OER_surface_study:
             except:
                 raise ValueError("Energy not provided and could not " \
                                  "be obtained from the relaxed atoms")
+            
+        self.base_surface_relaxed = surface.copy()
             
     def _add_site_data(self, 
             property_name: str,
@@ -181,7 +195,6 @@ class OER_surface_study:
         self._add_site_data('tag', tags)
         self.add_sites_df_relaxed = df
 
-    
     def initialize_adsorption_site_study(self, index: int) -> None:
         if self.add_sites_df_relaxed is None:
             raise ValueError("No adsorption sites have been " \
@@ -192,14 +205,22 @@ class OER_surface_study:
             f"{index} on the relaxed surface has already been " \
             "initialized.")
         
-        self.relaxed_surface_add_sites_studies[index] = \
-            OER_adsorption_site_study(
-                self.base_surface_relaxed.copy(),
-                self.add_sites_df_relaxed.loc[index, 'position'],
-                index
-            )
+        site_row = self.add_sites_df_relaxed[
+            self.add_sites_df_relaxed['Site index'] == index
+        ]
+        pos = site_row['position'].values[0]
+        site_type = site_row['site type'].values[0]
+        if site_type not in ['on-top', 'lattice O']:
+            raise ValueError(f"Unknown site type: {site_type}"\
+                "No methoded are implemented for this type")
         
-            
+        atoms = self.base_surface_relaxed.copy()
+        atoms[int(site_row['atom_index'].values[0])].tag = 3 # ad-site tag
+        
+        self.relaxed_surface_add_sites_studies[index] = \
+            OER_adsorption_site_study(atoms, pos, index,
+                init = (site_type, self.relaxed_surface_energy))
+        
     def update_adsorption_energies(self):
         if self.add_sites_df_relaxed is None:
             raise ValueError("No adsorption sites have been " \
@@ -211,15 +232,24 @@ class OER_surface_study:
         studies_dict = self.relaxed_surface_add_sites_studies
         default_energies_and_corrections = \
             self.OER_catalyst_study.get_gas_and_energy_corrections()
-        E_pure = self.relaxed_surface_energy
         
         for index, row in df.iterrows():
+
+            # Test if the adsorption site study for this index:
             study = studies_dict.get(index, None)
             if study is None:
                 continue
-            energies_dict = study.get_adsorption_site_energies()
 
-            for species in ['O', 'OH', 'OOH']:
+            # Test if enough energies are available:
+            energies_dict = study.get_adsorption_site_energies()
+            num_none_Es = 0
+            for energy in energies_dict.values():
+                if energy is None:
+                    num_none_Es += 1
+                if num_none_Es > 2: # there only exist 1 energy
+                    continue
+            
+            for species in ['O', 'OH']:
                 energy_key = f"{species}_adsorbed_energy"
                 E = energies_dict.get(energy_key, None)
                 if E is not None:
@@ -229,17 +259,15 @@ class OER_surface_study:
                     )
                 else:
                     G_approx = None
-                    G = None
 
                 df.loc[index, f"G_approx({species})"] = G_approx
-                df.loc[index, f"G({species})"] = G
-                    
+
             
     def _compute_adsorption_free_energies(self, 
                     species: str, energies_dict,
                     default_energies_and_corrections: dict[str, float]):
         
-        E_pure = self.relaxed_surface_energy
+        E_pure = energies_dict.get('clean_surface_energy')
         E_add = energies_dict.get(f"{species}_adsorbed_energy")
         E_adsorbed = E_add - E_pure 
         corr = default_energies_and_corrections.get(
@@ -251,6 +279,8 @@ class OER_surface_study:
 
         if species == 'O':
             G_approx = G_adsorbed_approx + 2*G_H - G_H2O
+        if species == 'OH':
+            G_approx = G_adsorbed_approx + G_H - G_H2O
             
         return G_approx, None  # Placeholder for now
 

@@ -196,7 +196,7 @@ class Job_handler():
                 ad_study = adsite_studies[site_index]
                 
                 if job_type == "O_adsorption":
-                    init_atoms = ad_study.get_initial_surface_with_O()
+                    init_atoms = ad_study.get_atoms_for_O_calc()
                     init_structure \
                         = AseAtomsAdaptor.get_structure(init_atoms)
                 elif job_type == 'OH_adsorption':
@@ -264,8 +264,7 @@ class Job_handler():
             ad_sites_O_Gs = ad_sites_df['G_approx(O)'].values
             ad_sites_O_Gs = np.array(ad_sites_O_Gs, dtype=np.float64)
             ad_sites_O_Gs = ad_sites_O_Gs[~np.isnan(ad_sites_O_Gs)]
-            over_pots.append(np.round(
-                                   (np.abs(ad_sites_O_Gs - 2.46)), 2)) # <<< -------- Needs to be able to handel NANS
+            over_pots.append(np.min(np.round(np.abs(ad_sites_O_Gs - 2.46), 2))) # <<< -------- Needs to be able to handel NANS
         
         self.rframe.candidates[candidate_id].idealOverPotential \
             = min(over_pots)
@@ -327,8 +326,7 @@ class Job_handler():
                                 get_adsorption_site_studies_dict()
                             ad_study = ad_site_dict[site_index]
                             if job_type == 'O_adsorption':
-                                ad_study.set_relaxed_surface_with_O(
-                                    atoms, E)
+                                ad_study.set_relaxed_O_calc(atoms, E)
                             elif job_type == 'OH_adsorption':
                                 raise NotImplementedError(f"Result processing "
                                     f"for job type {job_type} not implemented ")
@@ -374,7 +372,7 @@ class Job_handler():
                             get_adsorption_site_studies_dict()
                         ad_study = ad_site_dict[site_index]
                         if job_type == 'O_adsorption':
-                            ad_study.set_relaxed_surface_with_O(atoms)
+                            ad_study.set_relaxed_O_calc(atoms)
                         elif job_type == 'OH_adsorption':
                             raise NotImplementedError(f"Result processing "
                                 f"for job type {job_type} not implemented ")

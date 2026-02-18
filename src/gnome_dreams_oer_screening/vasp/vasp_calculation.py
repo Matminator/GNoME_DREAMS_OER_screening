@@ -138,8 +138,8 @@ def save_fake_results_to_traj(directory: Path, atoms: Atoms):
 class calculational_setup():
 
     def __init__(self, 
-                 mode: Literal['test', 'production_test', 'production'] 
-                 = 'production',
+                 mode: Literal['dummy_test', 'test', 'production_test', 
+                    'production'] = 'production',
                  bulk_set = RPBE_relax_bulk_set,
                  surface_set = RPBE_relax_surface_set
                  ) -> None:
@@ -176,12 +176,15 @@ class calculational_setup():
         if 'test' in self.mode:
             atoms = AseAtomsAdaptor.get_atoms(structure)
 
-            K_O = 0.070 + (-6.77) - (-14.217)
+            K_O = (-14.217) - 0.070 - (-6.77)
             K_OH = 0.361 + (-6.77)/2 - (-14.217)
-            x = 2.46 - K_O
+            x = 2.46 + K_O
             y = 1.23 - 2*x + K_OH
             
-            random_factor = np.random.normal(loc = 0, scale = 1)
+            if 'dummy' in self.mode:
+                random_factor = 0
+            else:
+                random_factor = np.random.normal(loc = 0, scale = 1)
 
             # Fake energy calculation:
             if 'H' in atoms.symbols:

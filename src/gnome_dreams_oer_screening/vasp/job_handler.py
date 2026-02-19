@@ -60,6 +60,15 @@ class Job_handler():
         note: str | None = None
         ) -> None:
 
+        # Get total number of processes 
+        new_p_id = str(len(self.rframe.processes.df)) # new process id
+
+        # Test if new process id already exists (should not happen if 
+        # process ids are assigned correctly):
+        if new_p_id in self.rframe.processes.df['process_id'].values:
+            raise RuntimeError(f"Process id {new_p_id} already " \
+                "exists. Cannot enter new process with id {new_p_id}.")
+
         # Get the candidates and processes rows from:
         cand_row = self.rframe.candidates[candidate_id]
         cand_processes = cand_row.processes
@@ -109,7 +118,7 @@ class Job_handler():
         
         p_df = cand_processes.df
         p_N = len(p_df)
-        new_process_row['process_id'] = str(p_N)
+        new_process_row['process_id'] = new_p_id
         new_process_row['VASP_dir'] = str(self.vasp_dir / 
             f"{self.vasp_dir_prefix}{candidate_id}_" \
             f"{job_type}_{new_process_row['process_id']}")
@@ -117,8 +126,8 @@ class Job_handler():
         self.rframe.processes.add_row(new_process_row, 
                                       allow_update=True)
         
-        return str(p_N)
-
+        return new_p_id
+    
     def submit_vasp_calculation(
         self,
         process_id: str,

@@ -147,6 +147,9 @@ class Job_handler():
             (self.rframe.processes.df['process_id'] == process_id)
         ]
 
+        if process_row.empty:
+            raise ValueError(f"No process found for process_id {process_id}.")
+
         # Get the candidate id from the process row:
         candidate_id = process_row['candidate_id'].values[0]
 
@@ -270,10 +273,10 @@ class Job_handler():
         for sur_study in sur_studies.values():
             sur_study.update_adsorption_energies()
             ad_sites_df = sur_study.get_adsorption_sites_df()
-            ad_sites_O_Gs = ad_sites_df['G_approx(O)'].values
-            ad_sites_O_Gs = np.array(ad_sites_O_Gs, dtype=np.float64)
-            ad_sites_O_Gs = ad_sites_O_Gs[~np.isnan(ad_sites_O_Gs)]
-            over_pots.append(np.min(np.round(np.abs(ad_sites_O_Gs - 2.46), 2))) # <<< -------- Needs to be able to handel NANS
+            ad_sites_ideal_op = ad_sites_df['ideal overpotential'].values
+            ad_sites_ideal_op = np.array(ad_sites_ideal_op, dtype=np.float64)
+            ad_sites_ideal_op = ad_sites_ideal_op[~np.isnan(ad_sites_ideal_op)]
+            over_pots.append(np.min(np.round(ad_sites_ideal_op, 2))) # <<< -------- Needs to be able to handel NANS
         
         self.rframe.candidates[candidate_id].idealOverPotential \
             = min(over_pots)

@@ -104,7 +104,7 @@ print('\n\n --->>> Results:')
 # --- Tools: -----------------------------------------------------------
 surface_study.update_adsorption_energies()
 print(surface_study.get_adsorption_sites_df()[['site type', 
-                                    'add site element', 'G_approx(O)']])
+                                    'ad site element', 'G_approx(O)']])
 
 print(EXPLOG.relational_frame.candidates.df)
 # ----------------------------------------------------------------------

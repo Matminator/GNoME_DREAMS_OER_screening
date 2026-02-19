@@ -46,7 +46,7 @@ def determine_surface_plane(input_surface: Structure | Slab,
     return atoms
 
 def determine_adsorption_sites(
-                input_surface: Slab | Atoms,
+                input_surface: Structure | Slab,
                 normal_vector: np.ndarray | None = None,
                 top_layer_tol: float = 1.5,
                 only_reduced_coord_O_sites: bool = False

@@ -8,10 +8,8 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 from gnome_dreams_oer_screening import OER_catalyst_study
 
-
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
-    determine_coordination_numbers
-    )
+    determine_coordination_numbers)
 
 # ______________________________________________________________________
 # ___ Testing of coordination number methods for study object __________

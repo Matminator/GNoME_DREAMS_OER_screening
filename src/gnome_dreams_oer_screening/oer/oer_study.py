@@ -169,13 +169,22 @@ class OER_catalyst_study:
         return self.species_energies.copy()
 
     def get_bulk_atoms(self) -> Atoms:
-        return self.bulk_atoms.copy()
+        if self.bulk_atoms is None:
+            return None
+        else:
+            return self.bulk_atoms.copy()
     
     def get_bulk_structure(self) -> Structure:
-        return self.bulk_structure.copy()
+        if self.bulk_structure is None:
+            return None
+        else:
+            return self.bulk_structure.copy()
 
     def get_distinct_millers(self) -> list[tuple[int, int, int]] | None:
-        return self.distinct_millers.copy()
+        if self.distinct_millers is None:
+            return None
+        else:
+            return self.distinct_millers.copy()
     
     def get_terminations_dict(self) -> dict[int, Slab]:
         return self.terminations.copy()

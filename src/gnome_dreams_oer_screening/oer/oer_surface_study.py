@@ -243,11 +243,17 @@ class OER_surface_study:
             # Test if enough energies are available:
             energies_dict = study.get_adsorption_site_energies()
             num_none_Es = 0
+            flag_continue = False
             for energy in energies_dict.values():
                 if energy is None:
                     num_none_Es += 1
                 if num_none_Es > 2: # there only exist 1 energy
-                    continue
+                    flag_continue = True
+                    break
+
+            # If not enough energies are available, skip this row:
+            if flag_continue:
+                continue
             
             for species in ['O', 'OH']:
                 energy_key = f"{species}_adsorbed_energy"
@@ -262,6 +268,7 @@ class OER_surface_study:
 
                 df.loc[index, f"G_approx({species})"] = G_approx
 
+        self._compute_ideal_overpotentials()
             
     def _compute_adsorption_free_energies(self, 
                     species: str, energies_dict,
@@ -284,7 +291,32 @@ class OER_surface_study:
             
         return G_approx, None  # Placeholder for now
 
-            
+    def _compute_ideal_overpotentials(self) -> None:
+        df = self.get_adsorption_sites_df()
+        if df is None:
+            return
+        
+        for index, row in df.iterrows():
+            G_O = row.get("G_approx(O)", None)
+            G_OH = row.get("G_approx(OH)", None)
+            if G_O is None:
+                continue
+            if G_OH is None:
+                ideal_overpot = np.abs(G_O - 2.46)/2
+                ideal_overpot = float(np.round(ideal_overpot, 2))
+                df.loc[index, "ideal overpotential"] = ideal_overpot
+            else:
+                G_H2O_OH_step = G_OH 
+                G_OH_O_step = G_O - G_OH
+                G_O_O2_step = (4.92 - G_O)/2
+                ideal_overpot = max(G_H2O_OH_step, G_OH_O_step, 
+                                    G_O_O2_step) - 1.23
+                ideal_overpot = float(np.round(ideal_overpot, 2))
+                df.loc[index, "ideal overpotential"] = ideal_overpot
+
+        self.add_sites_df_relaxed = df
+
+
     def get_adsorption_site_studies_dict(self, 
                             relaxed_surface: bool = True
                             ) -> dict[int, OER_adsorption_site_study]:

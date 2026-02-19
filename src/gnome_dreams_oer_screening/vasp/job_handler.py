@@ -273,13 +273,21 @@ class Job_handler():
         for sur_study in sur_studies.values():
             sur_study.update_adsorption_energies()
             ad_sites_df = sur_study.get_adsorption_sites_df()
+            if ad_sites_df is None:
+                continue
+            if 'ideal overpotential' not in ad_sites_df.columns:
+                continue
             ad_sites_ideal_op = ad_sites_df['ideal overpotential'].values
             ad_sites_ideal_op = np.array(ad_sites_ideal_op, dtype=np.float64)
             ad_sites_ideal_op = ad_sites_ideal_op[~np.isnan(ad_sites_ideal_op)]
-            over_pots.append(np.min(np.round(ad_sites_ideal_op, 2))) # <<< -------- Needs to be able to handel NANS
-        
-        self.rframe.candidates[candidate_id].idealOverPotential \
-            = min(over_pots)
+            if ad_sites_ideal_op.size == 0:
+                continue  # skip empty site arrays
+
+            over_pots.append(np.min(np.round(ad_sites_ideal_op, 2)))
+
+        if len(over_pots) != 0:
+            self.rframe.candidates[candidate_id].idealOverPotential \
+                = min(over_pots)
 
         
     def update_log(self) -> dict:

@@ -400,6 +400,8 @@ class OER_catalyst_study:
         TEMP-DOC
         """
 
+        ### <<<---------------------------------------------------------- NEED A TIME OUT!
+
         # Build method dict for later reference:
         new_ranking_method = {
             'method': method,

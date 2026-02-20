@@ -108,7 +108,7 @@ class Explog:
             calculation_type, termination_index, site_index, note)
         # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
         with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
-            pickle.dump(self.relational_frame, f)
+            pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
         return result
         
     def submit_process(self, process_id: str,
@@ -118,13 +118,13 @@ class Explog:
                                                  partition=partition)
         # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
         with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
-            pickle.dump(self.relational_frame, f)
+            pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
         
     def update_log(self):
         result = self.job_handler.update_log()
         # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
         with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
-            pickle.dump(self.relational_frame, f)
+            pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
         return result
     
     

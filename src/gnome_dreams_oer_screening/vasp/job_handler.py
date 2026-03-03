@@ -223,8 +223,8 @@ class Job_handler():
         if self.mode != 'test':
             
             if self.mode == 'slurm_test':
-                python_sp = 'src/gnome_dreams_oer_screening/niflheim/'+ \
-                    f'sleep_job.py {self.sleep_min}'
+                python_sp = 'src/gnome_dreams_oer_screening/' \
+                    f'niflheim/sleep_job.py {self.sleep_min}'
                 partition = 'xeon24el8_test'
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"

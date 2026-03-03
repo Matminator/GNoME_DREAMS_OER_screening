@@ -1,4 +1,6 @@
 import sys
+import time
+import platform
 # sys.path.append("/nfs/turbo/coe-venkvis/ziqiw-turbo/material_agent/GNoME_DREAMS_OER_screening/src/GNoME_DREAMS_OER_screening")
 
 import numpy as np
@@ -102,6 +104,7 @@ class OER_catalyst_study:
         self.terminations = {}
         self.applied_ranking_method = None
         self.oer_surface_studies = {}
+        self.failed_slab_generation = False
 
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()
@@ -189,61 +192,6 @@ class OER_catalyst_study:
     def get_terminations_dict(self) -> dict[int, Slab]:
         return self.terminations.copy()
     
-
-# --- DEPRECATED METHODS, TO BE REMOVED IN FUTURE VERSIONS -------------
-    # def _get_neighborlist(self, atoms: Atoms) -> NeighborList:
-    #     atoms.set_pbc(True)
-    #     cutoffs = natural_cutoffs(atoms)
-    #     nl = NeighborList(cutoffs, self_interaction=False, 
-    #                       bothways=True, skin = 1e-4)
-    #     nl.update(atoms)
-    #     return nl
-
-
-    # def _determine_coordination_numbers(self, atoms: Atoms,
-    #             method: Literal['all', 'disregard-coord-of-O', 
-    #             'O-coordination']) -> list[int]:
-    #     """
-    #     Determine coordination numbers for all atoms in the given ASE
-    #     Atoms object, using the specified method. The method "all" gives
-    #     gives the corrdination numbers for all atoms given any neighbor,
-    #     "disregard-coord-of-O" gives the coordination numbers for all 
-    #     atoms excluding oxygen (sets oxygen coordination numbers to 
-    #     zero). "O-coordination" gives the coordination numbers for all
-    #     atoms considering only oxygen neighbors (also sets oxygen 
-    #     coordination numbers to zero).
-    #     Args:
-    #         atoms (Atoms): ASE Atoms object representing the structure.
-    #         method (str): Method to compute coordination numbers.
-    #                       Currently only 'coordination' is implemented.
-    #     Returns:
-    #         list[int]: List of coordination numbers for each atom.
-    #     """
-        
-    #     # Build neighbor list:
-    #     atoms_copy = atoms.copy()
-    #     atoms_copy.set_pbc(True)
-    #     # The only neighborlist that will be needed:
-    #     nl = self._get_neighborlist(atoms_copy)
-
-    #     coord_nums = []
-    #     for index, atom in enumerate(atoms):
-    #         if atom.symbol == 'O' and method in ['disregard-coord-of-O', 
-    #                                               'O-coordination']:
-    #             coord_nums.append(0) # O atoms are ignored
-    #         elif method == 'O-coordination':
-
-    #             indices, offsets = nl.get_neighbors(index)
-    #             indices = [i for i in indices if atoms[i].symbol == 'O']
-
-    #             coord_nums.append(len(indices)) # len(indices) = CN
-    #         else:
-    #             indices, offsets = nl.get_neighbors(index)
-    #             coord_nums.append(len(indices)) # len(indices) = CN
-                
-    #     return coord_nums
-# --- END OF DEPRECATED METHODS ----------------------------------------
-    
     def _set_bulk_coordination(self, method: str) -> None:
         """
         Compute and store coordination numbers for bulk atoms, applying
@@ -284,57 +232,96 @@ class OER_catalyst_study:
             max_atoms: int = 120,
             vacuum: float = 1,
             max_layers: int = 6,
+            timeout: int = 15*60,  # Default timeout of 15 minutes
             **kwargs
             ) -> Atoms | None:
         """
         TEMP DOC
         """
 
-        num_layers = 2
-        while True:
-            if num_layers > max_layers:
+        if self.failed_slab_generation:
+            raise RuntimeError("Previous slab generation attempt " \
+            "failed due to timeout. Slab generation will not be " \
+            "attempted again. It is not possible to generate " \
+            "surfaces for this bulk structure.")
+
+        if platform.system() != "Windows":
+            # Linux / macOS version using signal
+            import signal
+
+            def timeout_handler(signum, frame):
+                self.failed_slab_generation = True
+                raise TimeoutError("Slab generation timed out." \
+                "It is not possible to generate surfaces for this " \
+                "bulk structure.")
+
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(timeout)  # Set timeout to specified value
+            start_time = None
+
+        else:
+            # Windows version using time module
+            start_time = time.time()
+
+
+
+        try:
+            num_layers = 2
+            while True:
+                if num_layers > max_layers:
+                    break
+                elif platform.system() == "Windows" and time.time() - start_time > timeout:
+                    self.failed_slab_generation = True
+                    raise TimeoutError("Slab generation timed out." \
+                        "It is not possible to generate surfaces for " \
+                        "this bulk structure.")
+
+                sg = SlabGenerator(
+                initial_structure = self.bulk_structure.copy(),
+                miller_index = miller_indices,
+                min_slab_size = num_layers,
+                min_vacuum_size = vacuum,
+                lll_reduce = True,
+                in_unit_planes = True,
+                center_slab = True,
+                primitive = True,
+                )
+                slabs = sg.get_slabs(symmetrize = symmetrize)
+                
+                # Check if any slabs were generated, if not, retry:
+                if len(slabs) == 0:
+                    num_layers += 1
+                    continue
+
+                # Test if slabs are thick enough, if not, retry:
+                thicknesses = [compute_slab_thickness(slab) for slab 
+                            in slabs]
+                if np.min(thicknesses) < min_slab_thickness:
+                    num_layers += 1
+                    continue
+                
+                # Test if slabs have enough atoms, if not, retry:
+                num_atoms = [len(slab) for slab in slabs]
+                if np.min(num_atoms) < min_atoms:
+                    num_layers += 1
+                    continue
+
+                if not all([eval_stoichiometry_diff(
+                        slab, self.bulk_structure,
+                        max_diff = stoichiometry_tolerance,
+                        max_diff_dict = max_diff_dict,
+                        ignore_species = ignore_stoichiometry_of_species,
+                        all_species_present = all_species_present
+                        ) for slab in slabs]):
+                    num_layers += 1
+                    continue
+                
                 break
-            sg = SlabGenerator(
-            initial_structure = self.bulk_structure.copy(),
-            miller_index = miller_indices,
-            min_slab_size = num_layers,
-            min_vacuum_size = vacuum,
-            lll_reduce = True,
-            in_unit_planes = True,
-            center_slab = True,
-            primitive = True,
-            )
-            slabs = sg.get_slabs(symmetrize = symmetrize)
+        finally:
+            if platform.system() != "Windows":
+                signal.alarm(0)  # Disable the alarm, on Linux / macOS
             
-            # Check if any slabs were generated, if not, retry:
-            if len(slabs) == 0:
-                num_layers += 1
-                continue
-
-            # Test if slabs are thick enough, if not, retry:
-            thicknesses = [compute_slab_thickness(slab) for slab 
-                           in slabs]
-            if np.min(thicknesses) < min_slab_thickness:
-                num_layers += 1
-                continue
-            
-            # Test if slabs have enough atoms, if not, retry:
-            num_atoms = [len(slab) for slab in slabs]
-            if np.min(num_atoms) < min_atoms:
-                num_layers += 1
-                continue
-
-            if not all([eval_stoichiometry_diff(
-                    slab, self.bulk_structure,
-                    max_diff = stoichiometry_tolerance,
-                    max_diff_dict = max_diff_dict,
-                    ignore_species = ignore_stoichiometry_of_species,
-                    all_species_present = all_species_present
-                    ) for slab in slabs]):
-                num_layers += 1
-                continue
-            
-            break
+    
 
         # <<<< --------------------------------------------------------- MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]

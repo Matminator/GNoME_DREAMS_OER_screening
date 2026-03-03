@@ -309,6 +309,12 @@ class Job_handler():
                 slurm_id = row['slurmID']
                 if slurm_id in slurm_queue.keys():
                     new_status = slurm_queue[slurm_id].lower()
+                    
+                    # If node is powering on, the job set to pending:
+                    # (ignoring configuring as it is irrelevant)
+                    if new_status == 'configuring':
+                        new_status = 'pending'
+
                     updates[row['process_id']] = new_status
                 else:
                     new_status = 'updating'

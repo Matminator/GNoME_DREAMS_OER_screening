@@ -263,8 +263,6 @@ class OER_catalyst_study:
             # Windows version using time module
             start_time = time.time()
 
-
-
         try:
             num_layers = 2
             while True:

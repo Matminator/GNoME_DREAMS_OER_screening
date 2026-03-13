@@ -42,7 +42,8 @@ def are_all_atoms_connected(
 
     return len(visited) == len(atoms)
 
-def test_if_systems_are_equal(atoms1: Atoms, atoms2: Atoms) -> bool:
+def are_systems_equal(atoms1: Atoms, atoms2: Atoms
+    ) -> tuple[bool, str]:
     """
     Test if two ASE Atoms objects represent the same system, ignoring
     atomic positions, but comparing atomic symbols, tags and ordering -
@@ -52,12 +53,12 @@ def test_if_systems_are_equal(atoms1: Atoms, atoms2: Atoms) -> bool:
     adsorption sites).
 
     Args:
-        atoms1: First Atoms object to compare.
-        atoms2: Second Atoms object to compare.
-    
+        atoms1 (Atoms): First Atoms object to compare.
+        atoms2 (Atoms): Second Atoms object to compare.
+
     Returns:
-        Tuble (bool, str): A tuple where the bool indicates if the 
-                           systems are equal, and the str provides a 
+        tuple[bool, str]: A tuple where the bool indicates if the
+                           systems are equal, and the str provides a
                            message in case they are not.
     """
 

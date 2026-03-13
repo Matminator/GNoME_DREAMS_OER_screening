@@ -16,7 +16,7 @@ from gnome_dreams_oer_screening.oer.ad_site_determination import (
 from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import (
     OER_adsorption_site_study)
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
-    test_if_systems_are_equal)
+    are_systems_equal)
 
 class OER_surface_study:
     """
@@ -125,8 +125,9 @@ class OER_surface_study:
                                  energy: float | None = None) -> None:
         
         
-        test_result = test_if_systems_are_equal(surface, 
-                                        self.base_surface_non_relaxed)
+        test_result = are_systems_equal(
+            surface, self.base_surface_non_relaxed
+        )
         if not test_result[0]:
             raise ValueError("The provided relaxed surface is not " + \
                 "consistent with the non-relaxed surface due to: " + \

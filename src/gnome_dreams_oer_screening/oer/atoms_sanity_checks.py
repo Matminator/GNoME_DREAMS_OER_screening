@@ -42,6 +42,46 @@ def are_all_atoms_connected(
 
     return len(visited) == len(atoms)
 
+def test_if_systems_are_equal(atoms1: Atoms, atoms2: Atoms) -> bool:
+    """
+    Test if two ASE Atoms objects represent the same system, ignoring
+    atomic positions, but comparing atomic symbols, tags and ordering -
+    the latter at an superficial level. Intented to be used for testing 
+    if the correct system is provided after a relaxation - and if the 
+    ordering has not changed (important for tag-based identification of 
+    adsorption sites).
+
+    Args:
+        atoms1: First Atoms object to compare.
+        atoms2: Second Atoms object to compare.
+    
+    Returns:
+        Tuble (bool, str): A tuple where the bool indicates if the 
+                           systems are equal, and the str provides a 
+                           message in case they are not.
+    """
+
+    equal, message = True, ""
+
+    if len(atoms1) != len(atoms2):
+        equal = False
+        message += f"Number of atoms differ: {len(atoms1)} vs " + \
+            f"{len(atoms2)}"
+    
+    for i, (atom1, atom2) in enumerate(zip(atoms1, atoms2)):
+        if atom1.symbol != atom2.symbol:
+            equal = False
+            message += f"Atom {i} has different symbols:" + \
+                f"{atom1.symbol} vs {atom2.symbol}"
+        if atom1.tag != atom2.tag:
+            equal = False
+            message += f"Atom {i} has different tags: {atom1.tag} " + \
+                f"vs {atom2.tag}"
+
+    return equal, message
+
+
+
 
 # def _get_adsorbed_O_index(
 #     study: OER_adsorption_site_study, atoms: Atoms

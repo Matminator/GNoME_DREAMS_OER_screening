@@ -15,6 +15,8 @@ from gnome_dreams_oer_screening.oer.ad_site_determination import (
     determine_adsorption_sites)
 from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import (
     OER_adsorption_site_study)
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    test_if_systems_are_equal)
 
 class OER_surface_study:
     """
@@ -122,17 +124,13 @@ class OER_surface_study:
     def set_relaxed_base_surface(self, surface: Atoms, 
                                  energy: float | None = None) -> None:
         
-        if len(surface) != len(self.base_surface_non_relaxed):
-            raise ValueError("This is not the correct relaxed surface" \
-                "The provided surface has a different number of atoms" \
-                f" than the non-relaxed surface, namly {len(surface)}" \
-                f" instead of {len(self.base_surface_non_relaxed)}.")
         
-        for i in range(len(surface)):
-            if surface[i].symbol != self.base_surface_non_relaxed[i].symbol:
-                raise ValueError("The provided surfaces is either not "\
-                    "the correct relaxed surface or the order of the " \
-                    "atoms is different. BOTH ARE CRITICAL ISSUES.")
+        test_result = test_if_systems_are_equal(surface, 
+                                        self.base_surface_non_relaxed)
+        if not test_result[0]:
+            raise ValueError("The provided relaxed surface is not " + \
+                "consistent with the non-relaxed surface due to: " + \
+                f"{test_result[1]}")
 
         if energy is not None:
             self.relaxed_surface_energy = energy

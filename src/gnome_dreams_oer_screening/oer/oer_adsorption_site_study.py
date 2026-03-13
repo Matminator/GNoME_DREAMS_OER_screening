@@ -63,6 +63,8 @@ class OER_adsorption_site_study:
     
     def set_relaxed_O_calc(self, atoms: Atoms,
                                 energy: float | None = None) -> None:
+        
+        # test if atoms provided makes sence... <<<<<<<<<<<<<<<<<<-------- TODO
       
         if energy is not None:
             E = energy

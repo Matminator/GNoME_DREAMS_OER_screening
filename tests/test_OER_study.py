@@ -1,6 +1,4 @@
 import pathlib
-import sys
-import signal
 import pytest
 import numpy as np
 
@@ -202,7 +200,6 @@ def test_build_surfaces_raises_if_previous_timeout_failed():
 
 
 @pytest.mark.mini
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only timeout path")
 def test_build_surfaces_timeout_sets_failed_flag(monkeypatch):
     atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
     study = OER_catalyst_study(
@@ -214,38 +211,6 @@ def test_build_surfaces_timeout_sets_failed_flag(monkeypatch):
 
     time_values = iter([0.0, 2.0])
     monkeypatch.setattr(oer_study_module.time, "time", lambda: next(time_values))
-
-    with pytest.raises(
-        TimeoutError,
-        match="Slab generation timed out\\.It is not possible to generate surfaces for this bulk structure\\.",
-    ):
-        study._build_surfaces((1, 0, 0), timeout=1)
-
-    assert study.failed_slab_generation is True
-
-
-@pytest.mark.mini
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-only timeout path")
-def test_build_surfaces_linux_timeout_sets_failed_flag_and_message(monkeypatch):
-    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
-    study = OER_catalyst_study(
-        atoms,
-        H2_gas_free_energy=-2.0,
-        H2O_gas_free_energy=-4.0,
-        use_init_as_relaxed_bulk=True,
-    )
-
-    state = {"handler": None}
-
-    def fake_signal(sig, handler):
-        state["handler"] = handler
-
-    def fake_alarm(seconds):
-        if seconds > 0:
-            state["handler"](None, None)
-
-    monkeypatch.setattr(signal, "signal", fake_signal)
-    monkeypatch.setattr(signal, "alarm", fake_alarm)
 
     with pytest.raises(
         TimeoutError,

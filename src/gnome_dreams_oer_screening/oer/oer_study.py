@@ -1,7 +1,4 @@
-import sys
 import time
-import platform
-# sys.path.append("/nfs/turbo/coe-venkvis/ziqiw-turbo/material_agent/GNoME_DREAMS_OER_screening/src/GNoME_DREAMS_OER_screening")
 
 import numpy as np
 import pandas as pd
@@ -245,80 +242,61 @@ class OER_catalyst_study:
             "attempted again. It is not possible to generate " \
             "surfaces for this bulk structure.")
 
-        if platform.system() != "Windows":
-            # Linux / macOS version using signal
-            import signal
+        # Log time, to be used for timeout handling:
+        start_time = time.time()
 
-            def timeout_handler(signum, frame):
+        num_layers = 2
+        while True:
+            if num_layers > max_layers:
+                break
+            elif time.time() - start_time > timeout:
                 self.failed_slab_generation = True
                 raise TimeoutError("Slab generation timed out." \
-                "It is not possible to generate surfaces for this " \
-                "bulk structure.")
+                    "It is not possible to generate surfaces for " \
+                    "this bulk structure.")
 
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(timeout)  # Set timeout to specified value
-            start_time = None
-
-        else:
-            # Windows version using time module
-            start_time = time.time()
-
-        try:
-            num_layers = 2
-            while True:
-                if num_layers > max_layers:
-                    break
-                elif platform.system() == "Windows" and time.time() - start_time > timeout:
-                    self.failed_slab_generation = True
-                    raise TimeoutError("Slab generation timed out." \
-                        "It is not possible to generate surfaces for " \
-                        "this bulk structure.")
-
-                sg = SlabGenerator(
-                initial_structure = self.bulk_structure.copy(),
-                miller_index = miller_indices,
-                min_slab_size = num_layers,
-                min_vacuum_size = vacuum,
-                lll_reduce = True,
-                in_unit_planes = True,
-                center_slab = True,
-                primitive = True,
-                )
-                slabs = sg.get_slabs(symmetrize = symmetrize)
-                
-                # Check if any slabs were generated, if not, retry:
-                if len(slabs) == 0:
-                    num_layers += 1
-                    continue
-
-                # Test if slabs are thick enough, if not, retry:
-                thicknesses = [compute_slab_thickness(slab) for slab 
-                            in slabs]
-                if np.min(thicknesses) < min_slab_thickness:
-                    num_layers += 1
-                    continue
-                
-                # Test if slabs have enough atoms, if not, retry:
-                num_atoms = [len(slab) for slab in slabs]
-                if np.min(num_atoms) < min_atoms:
-                    num_layers += 1
-                    continue
-
-                if not all([eval_stoichiometry_diff(
-                        slab, self.bulk_structure,
-                        max_diff = stoichiometry_tolerance,
-                        max_diff_dict = max_diff_dict,
-                        ignore_species = ignore_stoichiometry_of_species,
-                        all_species_present = all_species_present
-                        ) for slab in slabs]):
-                    num_layers += 1
-                    continue
-                
-                break
-        finally:
-            if platform.system() != "Windows":
-                signal.alarm(0)  # Disable the alarm, on Linux / macOS
+            sg = SlabGenerator(
+            initial_structure = self.bulk_structure.copy(),
+            miller_index = miller_indices,
+            min_slab_size = num_layers,
+            min_vacuum_size = vacuum,
+            lll_reduce = True,
+            in_unit_planes = True,
+            center_slab = True,
+            primitive = True,
+            )
+            slabs = sg.get_slabs(symmetrize = symmetrize)
             
+            # Check if any slabs were generated, if not, retry:
+            if len(slabs) == 0:
+                num_layers += 1
+                continue
+
+            # Test if slabs are thick enough, if not, retry:
+            thicknesses = [compute_slab_thickness(slab) for slab 
+                        in slabs]
+            if np.min(thicknesses) < min_slab_thickness:
+                num_layers += 1
+                continue
+            
+            # Test if slabs have enough atoms, if not, retry:
+            num_atoms = [len(slab) for slab in slabs]
+            if np.min(num_atoms) < min_atoms:
+                num_layers += 1
+                continue
+
+            if not all([eval_stoichiometry_diff(
+                    slab, self.bulk_structure,
+                    max_diff = stoichiometry_tolerance,
+                    max_diff_dict = max_diff_dict,
+                    ignore_species = ignore_stoichiometry_of_species,
+                    all_species_present = all_species_present
+                    ) for slab in slabs]):
+                num_layers += 1
+                continue
+            
+            break # Surfaces was generated successfully, exit loop
+        
     
 
         # <<<< --------------------------------------------------------- MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS

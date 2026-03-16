@@ -3,9 +3,9 @@ from ase import Atoms
 from ase.geometry import find_mic
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import (
-    OER_adsorption_site_study,
-)
+
+class StructureConsistencyError(ValueError):
+    """Raised when a relaxed structure is inconsistent with its reference."""
 
 
 def are_all_atoms_connected(
@@ -62,110 +62,28 @@ def are_systems_equal(atoms1: Atoms, atoms2: Atoms
                            message in case they are not.
     """
 
-    equal, message = True, ""
+    equal = True
+    message_parts = []
 
     if len(atoms1) != len(atoms2):
         equal = False
-        message += f"Number of atoms differ: {len(atoms1)} vs " + \
-            f"{len(atoms2)}"
+        message_parts.append(
+            f"Number of atoms differ: {len(atoms1)} vs {len(atoms2)}"
+        )
     
     for i, (atom1, atom2) in enumerate(zip(atoms1, atoms2)):
         if atom1.symbol != atom2.symbol:
             equal = False
-            message += f"Atom {i} has different symbols:" + \
+            message_parts.append(
+                f"Atom {i} has different symbols: "
                 f"{atom1.symbol} vs {atom2.symbol}"
+            )
         if atom1.tag != atom2.tag:
             equal = False
-            message += f"Atom {i} has different tags: {atom1.tag} " + \
+            message_parts.append(
+                f"Atom {i} has different tags: {atom1.tag} "
                 f"vs {atom2.tag}"
+            )
 
-    return equal, message
+    return equal, "; ".join(message_parts)
 
-
-
-
-# def _get_adsorbed_O_index(
-#     study: OER_adsorption_site_study, atoms: Atoms
-# ) -> int:
-#     if study.site_type == "on-top":
-#         target_tag = 4
-#     elif study.site_type == "lattice O":
-#         target_tag = 3
-#     else:
-#         raise ValueError(f"Unsupported adsorption site type: {study.site_type}")
-
-#     O_indices = [
-#         i
-#         for i, atom in enumerate(atoms)
-#         if atom.symbol == "O" and atom.tag == target_tag
-#     ]
-#     if len(O_indices) != 1:
-#         raise ValueError(
-#             "Could not identify a unique adsorbed O atom "
-#             f"with tag={target_tag}."
-#         )
-
-#     return int(O_indices[0])
-
-
-# def is_adsorbate_near_site(
-#     study: OER_adsorption_site_study,
-#     atoms: Atoms,
-#     max_site_drift: float = 1.5,
-#     mic: bool = True,
-# ) -> bool:
-#     """
-#     Test if the adsorbed O atom has drifted too far from the initial
-#     adsorption position for the site study.
-#     """
-
-#     if max_site_drift <= 0:
-#         raise ValueError("max_site_drift must be positive.")
-
-#     O_index = _get_adsorbed_O_index(study, atoms)
-#     displacement = atoms[O_index].position - np.asarray(
-#         study.init_add_position, dtype=float
-#     )
-
-#     if mic:
-#         displacement, _ = find_mic(
-#             displacement[None, :], cell=atoms.cell, pbc=atoms.pbc
-#         )
-#         displacement = displacement[0]
-
-#     drift_distance = float(np.linalg.norm(displacement))
-#     return drift_distance <= max_site_drift
-
-
-# def is_OH_adsorbate_intact(
-#     study: OER_adsorption_site_study,
-#     atoms: Atoms,
-#     min_OH_distance: float = 0.6,
-#     max_OH_distance: float = 1.5,
-#     mic: bool = True,
-# ) -> bool:
-#     """
-#     Test if O and H in an OH adsorbate remain bonded.
-#     """
-
-#     if min_OH_distance <= 0:
-#         raise ValueError("min_OH_distance must be positive.")
-#     if max_OH_distance <= min_OH_distance:
-#         raise ValueError(
-#             "max_OH_distance must be larger than min_OH_distance."
-#         )
-
-#     O_index = _get_adsorbed_O_index(study, atoms)
-#     H_indices = [
-#         i
-#         for i, atom in enumerate(atoms)
-#         if atom.symbol == "H" and atom.tag == 4
-#     ]
-#     if len(H_indices) != 1:
-#         raise ValueError(
-#             "Could not identify a unique OH adsorbate H atom with tag=4."
-#         )
-#     H_index = int(H_indices[0])
-
-#     d_OH = float(atoms.get_distance(O_index, H_index, mic=mic))
-#     return min_OH_distance <= d_OH <= max_OH_distance

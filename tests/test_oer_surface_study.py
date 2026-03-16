@@ -16,6 +16,9 @@ from pymatgen.io.ase import AseAtomsAdaptor
 from gnome_dreams_oer_screening import (OER_catalyst_study, 
 OER_surface_study, OER_adsorption_site_study)
 from gnome_dreams_oer_screening import Explog
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    StructureConsistencyError,
+)
 
 @pytest.fixture(scope="module")
 def TiO2_r_bulk():
@@ -165,3 +168,40 @@ def test_adsorbtion_update_O_adsorption_energies(
         diff = row['G_approx(O)'] - 2.46
         assert abs(diff) < 0.001, f"Expected G_approx(O) = 2.46, got " \
             f"{row['G_approx(O)']} for site {i} of type {row['site type']}"
+
+
+def test_set_relaxed_base_surface_raises_structure_consistency_error(
+        TiO2_r_bulk):
+    atoms, _ = TiO2_r_bulk
+
+    study = OER_catalyst_study(
+        atoms.copy(),
+        H2_gas_free_energy=-6.77,
+        H2O_gas_free_energy=-14.217,
+        use_init_as_relaxed_bulk=True,
+    )
+    atoms_to_relax = study.get_init_atoms()
+    study.set_relaxed_structure(atoms_to_relax)
+    study.predict_most_likely_surfaces(method='O-coordination')
+    study.initialize_oer_surface_study(0)
+    surface_study = study.get_surface_studies()[0]
+
+    reordered_surface = surface_study.get_non_relaxed_surface()
+
+    swap_index = next(
+        i for i, atom in enumerate(reordered_surface)
+        if atom.symbol != reordered_surface[0].symbol
+    )
+    reordered_indices = list(range(len(reordered_surface)))
+    reordered_indices[0], reordered_indices[swap_index] = (
+        reordered_indices[swap_index],
+        reordered_indices[0],
+    )
+    reordered_surface = reordered_surface[reordered_indices]
+
+    with pytest.raises(
+        StructureConsistencyError, match="different symbols"
+    ):
+        surface_study.set_relaxed_base_surface(
+            reordered_surface, energy=-278.13500000000005
+        )

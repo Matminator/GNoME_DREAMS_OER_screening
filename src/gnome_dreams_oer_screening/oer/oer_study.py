@@ -23,6 +23,10 @@ from gnome_dreams_oer_screening.oer.ad_site_determination import (
     determine_adsorption_sites
 )
 
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    are_systems_equal,
+    StructureConsistencyError,
+)
 
 # Suppress specific warnings from pymatgen about too many sites removed.
 # These warnings can occur during slab generation and are handled be 
@@ -76,6 +80,9 @@ class OER_catalyst_study:
                  use_init_as_relaxed_bulk: bool = False,
                  ):
         
+        for atom in init_atoms:
+            atom.tag = 0 # Ensure all tags are set to 0
+
         self.init_atoms = init_atoms
         self.init_structure = AseAtomsAdaptor.get_structure(init_atoms)
         
@@ -111,7 +118,9 @@ class OER_catalyst_study:
     
     def set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
                            ) -> None:
-        
+            
+        # Do not allow resetting the relaxed bulk structure if surfaces 
+        # have already been generated:
         if len(self.terminations) > 0:
             raise RuntimeError("Relaxed bulk structure cannot be set " \
                 "after surfaces have been generated. Once surfaces "
@@ -120,23 +129,29 @@ class OER_catalyst_study:
                 "instance if you want to use a different relaxed bulk" \
                 " structure")
         
-        # Test if the relaxed bulk structure has the same composition:
-        if not eval_stoichiometry_diff(self.init_atoms, relaxed_bulk, 
-                                       max_diff = 1e-6):   
-            raise ValueError("The provided relaxed_bulk structure " \
-            "does not match the same composition as the initial " \
-            "bulk structure.")
-        
         if isinstance(relaxed_bulk, Atoms):
-            self.bulk_structure = AseAtomsAdaptor.get_structure(
-                relaxed_bulk)
-            self.bulk_atoms = relaxed_bulk
+            relaxed_bulk_atoms = relaxed_bulk
+            relaxed_bulk_structure = AseAtomsAdaptor.get_structure(
+                relaxed_bulk
+            )
         elif isinstance(relaxed_bulk, Structure):
-            self.bulk_structure = relaxed_bulk      
-            self.bulk_atoms = AseAtomsAdaptor.get_atoms(relaxed_bulk)
+            relaxed_bulk_atoms = AseAtomsAdaptor.get_atoms(relaxed_bulk)
+            relaxed_bulk_structure = relaxed_bulk
         else:
             raise ValueError("relaxed_bulk must be an ASE Atoms " \
                 "object or a Pymatgen Structure object.")
+
+        # Test provided relaxed_bulk structure matches the initial bulk:
+        equal_results = are_systems_equal(relaxed_bulk_atoms, self.init_atoms)
+        if not equal_results[0]:
+            raise StructureConsistencyError(
+                "The provided relaxed_bulk structure does not match "
+                "the initial bulk structure. Details: "
+                f"{equal_results[1]}"
+            )
+
+        self.bulk_structure = relaxed_bulk_structure
+        self.bulk_atoms = relaxed_bulk_atoms
 
     def set_energies(self,
             H2O_gas_free_energy: float = None,
@@ -232,9 +247,6 @@ class OER_catalyst_study:
             timeout: int = 15*60,  # Default timeout of 15 minutes
             **kwargs
             ) -> Atoms | None:
-        """
-        TEMP DOC
-        """
 
         if self.failed_slab_generation:
             raise RuntimeError("Previous slab generation attempt " \

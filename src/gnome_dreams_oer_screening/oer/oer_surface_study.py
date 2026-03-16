@@ -16,7 +16,10 @@ from gnome_dreams_oer_screening.oer.ad_site_determination import (
 from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import (
     OER_adsorption_site_study)
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
-    are_systems_equal)
+    are_all_atoms_connected,
+    are_systems_equal,
+    StructureConsistencyError,
+)
 
 class OER_surface_study:
     """
@@ -107,6 +110,10 @@ class OER_surface_study:
         self.add_sites_df_non_relaxed = None
         self.base_surface_relaxed = None
         self.add_sites_df_relaxed = None
+        
+        # This lock is for preventing futher calculations (add-site 
+        # studies) if a non-continuous relaxed surface is been provided.
+        self.study_locked = False
 
         self.relaxed_surface_add_sites_studies = {}
         self.non_relaxed_surface_add_sites_studies = {}
@@ -122,28 +129,72 @@ class OER_surface_study:
         return self.base_surface_relaxed.copy()
 
     def set_relaxed_base_surface(self, surface: Atoms, 
-                                 energy: float | None = None) -> None:
-        
-        
-        test_result = are_systems_equal(
-            surface, self.base_surface_non_relaxed
-        )
-        if not test_result[0]:
-            raise ValueError("The provided relaxed surface is not " + \
-                "consistent with the non-relaxed surface due to: " + \
-                f"{test_result[1]}")
+                                 energy: float | None = None,
+                                 ) -> bool:
+        """
+        set the relaxed surface structure for this surface study. This 
+        is for later use in the determination of adsorption sites and
+        adsorption energies.
 
-        if energy is not None:
-            self.relaxed_surface_energy = energy
+        Args:
+        surface: Atoms
+        energy: float | None
+            The potential energy of the relaxed surface. If None,
+            the energy will be obtained from the relaxed surface
+            structure (if possible). Default is None.
+
+        Returns:
+        bool
+            Whether the provided relaxed surface is a single connected
+            system. If False, the surface study is locked and further 
+            computations (e.g. adsorption site studies) should not be 
+            carried out for this surface study.
+        """
+
+        # make sure the study is not locked due to a previously provided
+        # non-continuous relaxed surface:
+        if self.study_locked:
+            raise ValueError("The surface study is locked due to a "
+            "previously provided non-continuous relaxed surface.")
+
+        if self.base_surface_relaxed is not None:
+            raise ValueError("A relaxed surface has already been "
+            "provided for this surface study. Providing a new relaxed "\
+            "surface at this stage would breake the validity of any " \
+            "downstream analysis (e.g. adsorption sites and energies)")
+        
+        # Test if the provided surface is consistent with the 
+        # non-relaxed surface:
+        equal_results = are_systems_equal(surface, 
+                                        self.base_surface_non_relaxed)
+        if not equal_results[0]:
+            raise StructureConsistencyError(
+                "The provided relaxed surface is not "
+                "consistent with the non-relaxed surface due to: " + \
+                f"{equal_results[1]}"
+            )        
+        
+        # Test if the provided surface is a single connected system:
+        if not are_all_atoms_connected(surface):
+            self.study_locked = True
+
         else:
-            try:
-                self.relaxed_surface_energy = \
-                    surface.get_potential_energy()
-            except:
-                raise ValueError("Energy not provided and could not " \
-                                 "be obtained from the relaxed atoms")
-            
-        self.base_surface_relaxed = surface.copy()
+            if energy is not None:
+                self.relaxed_surface_energy = energy
+            else:
+                try:
+                    self.relaxed_surface_energy = \
+                        surface.get_potential_energy()
+                except:
+                    raise ValueError("Energy not provided and could " \
+                        "not be obtained from the relaxed atoms")
+                
+            self.base_surface_relaxed = surface.copy()
+
+        # Return bool on whether the surface is continuous or not. 
+        # Significant for determining if futher computations/analasis 
+        # sould be carried out for this surface study:
+        return not self.study_locked
             
     def _add_site_data(self, 
             property_name: str,

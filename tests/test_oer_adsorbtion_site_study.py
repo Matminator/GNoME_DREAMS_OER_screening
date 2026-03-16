@@ -94,9 +94,7 @@ def test_get_OH_adsorbed_atoms_returns_three_distinct_initializations():
 
 
 def test_get_OH_adsorbed_atoms_lattice_O_uses_tag_3():
-    study = _build_simple_lattice_O_study()
-
-    relaxed_atoms = Atoms(
+    init_surface = Atoms(
         "PtOO",
         positions=[
             [0.0, 0.0, 0.0],   # surface metal
@@ -106,15 +104,22 @@ def test_get_OH_adsorbed_atoms_lattice_O_uses_tag_3():
         cell=[10.0, 10.0, 10.0],
         pbc=True,
     )
-    relaxed_atoms[1].tag = 3
-    relaxed_atoms[2].tag = 4
-    study.set_relaxed_O_calc(relaxed_atoms, energy=-2.0)
+    init_surface[1].tag = 3
+    init_surface[2].tag = 4
+
+    study = OER_adsorption_site_study(
+        init_surface=init_surface,
+        init_add_position=np.array([0.0, 0.0, 1.8]),
+        site_index=1,
+        surface_normal=np.array([0.0, 0.0, 1.0]),
+        init=("lattice O", -1.0),
+    )
 
     OH_inits = study.get_OH_adsorbed_atoms()
     assert len(OH_inits) == 3
 
-    target_O_pos = relaxed_atoms[1].position.copy()
-    other_O_pos = relaxed_atoms[2].position.copy()
+    target_O_pos = init_surface[1].position.copy()
+    other_O_pos = init_surface[2].position.copy()
     normal = study.surface_normal / np.linalg.norm(study.surface_normal)
 
     for OH_atoms in OH_inits:

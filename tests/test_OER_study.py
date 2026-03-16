@@ -8,6 +8,9 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 from gnome_dreams_oer_screening import OER_catalyst_study
 import gnome_dreams_oer_screening.oer.oer_study as oer_study_module
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    StructureConsistencyError,
+)
     
 # --- Initilization tests of the OER_catalyst_study class: -------------
 @pytest.mark.mini
@@ -60,6 +63,26 @@ def test_error_apon_setting_relaxed_structure():
     assert oer_study.get_init_atoms() ==  atoms_1    
     with pytest.raises(ValueError):
         oer_study.set_relaxed_structure(atoms_2)
+
+
+@pytest.mark.mini
+def test_set_relaxed_structure_raises_structure_consistency_error():
+    atoms = Atoms(
+        "TiO",
+        positions=[[0, 0, 0], [1, 0, 0]],
+        cell=[2, 2, 2],
+        pbc=True,
+    )
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4
+    )
+
+    reordered_atoms = oer_study.get_init_atoms()[[1, 0]]
+
+    with pytest.raises(
+        StructureConsistencyError, match="different symbols"
+    ):
+        oer_study.set_relaxed_structure(reordered_atoms)
 # --- End of initilization tests of the OER_catalyst_study class: ------
 
 # --- TEMP TITEL... 

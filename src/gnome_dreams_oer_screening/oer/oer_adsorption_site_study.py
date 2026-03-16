@@ -1,6 +1,13 @@
 import numpy as np
 import pandas as pd
 from ase import Atoms
+from ase.geometry import find_mic
+
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    are_all_atoms_connected,
+    are_systems_equal,
+    StructureConsistencyError,
+    )
 
     
 class OER_adsorption_site_study:
@@ -61,10 +68,98 @@ class OER_adsorption_site_study:
     def get_atoms_for_O_calc(self) -> Atoms:
         return self.atoms_for_O_calc.copy()
     
+
+# ------ test if atoms provided makes sence... <<<<<<<<<<<<<<<<<<-------- TODO
+
+    def _get_adsorbed_O_index(self) -> int:
+        if self.site_type == "on-top":
+            atoms = self.relaxed_O_atoms # O added for the O relaxation
+            target_tag = 4
+        elif self.site_type == "lattice O":
+            atoms = self.init_surface # O already present in the init
+            target_tag = 3
+        else:
+            raise ValueError(f"Unsupported adsorption site type: "
+                                                    f"{self.site_type}")
+
+        O_indices = [
+            i
+            for i, atom in enumerate(atoms)
+            if atom.symbol == "O" and atom.tag == target_tag
+        ]
+        if len(O_indices) != 1:
+            raise ValueError(
+                "Could not identify a unique adsorbed O atom "
+                f"with tag={target_tag}."
+            )
+
+        return int(O_indices[0])
+
+    def is_adsorbate_near_site(
+        self,
+        atoms: Atoms,
+        max_site_drift: float = 1.5,
+    ) -> bool:
+        """
+        Test if the adsorbed O atom has drifted too far from the initial
+        adsorption position for the site study.
+        """
+
+        if max_site_drift <= 0:
+            raise ValueError("max_site_drift must be positive.")
+
+        O_index = self._get_adsorbed_O_index()
+        displacement = atoms[O_index].position - np.asarray(
+            self.init_add_position, dtype=float 
+        )
+
+        displacement, _ = find_mic(
+            displacement[None, :], cell=atoms.cell, pbc=atoms.pbc
+        )
+        displacement = displacement[0]
+
+        drift_distance = float(np.linalg.norm(displacement))
+        return drift_distance <= max_site_drift
+
+
+    def is_OH_adsorbate_intact(
+        self,
+        atoms: Atoms,
+        max_OH_distance: float = 1.5,
+    ) -> bool:
+        """
+        Test if O and H in an OH adsorbate remain bonded.
+        """
+
+        O_index = self._get_adsorbed_O_index()
+        H_indices = [
+            i
+            for i, atom in enumerate(atoms)
+            if atom.symbol == "H" and atom.tag == 4
+        ]
+        if len(H_indices) != 1:
+            raise ValueError(
+                "Could not identify a unique OH adsorbate H atom with" \
+                " tag=4."
+            )
+        H_index = int(H_indices[0])
+
+        d_OH = float(atoms.get_distance(O_index, H_index, mic=True))
+        return d_OH <= max_OH_distance
+    
+    
     def set_relaxed_O_calc(self, atoms: Atoms,
                                 energy: float | None = None) -> None:
         
-        # test if atoms provided makes sence... <<<<<<<<<<<<<<<<<<-------- TODO
+        # Test provided relaxed_bulk structure matches the initial bulk:
+        equal_results = are_systems_equal(atoms,
+                                          self.get_atoms_for_O_calc())
+        if not equal_results[0]:
+            raise StructureConsistencyError(
+                "The provided relaxed_bulk structure does not match "
+                "the initial bulk structure. Details: "
+                f"{equal_results[1]}"
+            )
       
         if energy is not None:
             E = energy
@@ -85,6 +180,7 @@ class OER_adsorption_site_study:
         else:
             raise ValueError("Invalied adsorbtion site type")       
             
+
     def get_adsorption_site_energies(self) -> dict[str, float | None]:
         return self.energies_dict.copy()
     

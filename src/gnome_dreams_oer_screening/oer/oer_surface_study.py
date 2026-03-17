@@ -254,8 +254,9 @@ class OER_surface_study:
         site_row = self.add_sites_df_relaxed[
             self.add_sites_df_relaxed['Site index'] == index
         ]
-        # TODO: Add explicit check that `site_row` is non-empty before
-        # using `values[0]` below to avoid `IndexError`.
+        # TODO: Add explicit check that index exists in
+        # initialize_adsorption_site_study before values[0] access
+        # (avoid IndexError).
         pos = site_row['position'].values[0]
         site_type = site_row['site type'].values[0]
         if site_type not in ['on-top', 'lattice O']:

@@ -1,10 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
-import warnings
 from ase import Atoms
-from ase.visualize import view
-from ase.neighborlist import natural_cutoffs #, NeighborList
 from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab
@@ -23,8 +20,8 @@ from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
 
 class OER_surface_study:
     """
-    Class for determening surface adsorption sites. This class is 
-    intented to be initialized through an OER_catalyst_study object, via
+    Class for determining surface adsorption sites. This class is 
+    intended to be initialized through an OER_catalyst_study object, via
     the method 'initialize_OER_surface_studies' method. This class 
     handles the determination and storage of surface adsorption sites.
     For later computation of adsorption energies for OER intermediates 
@@ -38,7 +35,7 @@ class OER_surface_study:
     called. This initializes an OER_adsorption_site_study object for the
     given site index. The OER_adsorption_site_study object then handles
     the placement of the adsorbate and storage of the adsorbate
-    energies. After having stored the relvant energies in the
+    energies. After having stored the relevant energies in the
     OER_adsorption_site_study object, the 'update_adsorption_energies'
     method may be called to compute adsorption energies. These may then 
     be retrieved through the 'get_adsorption_sites_df' method, yielding 
@@ -71,19 +68,18 @@ class OER_surface_study:
                  fixed_bottom_half: bool = True, vacuum: float = 14
                  ):
 
-        # Make sure that the surfaces is on the form of an ASE Atoms 
-        # object and an np.array contaning the normal vector:
+        # Make sure that the surface is on the form of an ASE Atoms 
+        # object and an np.array containing the normal vector:
         base_surface, surface_normal = get_atoms_and_normal_from_input(
                                             input_surface, normal_vector
                                             )
 
-        assert np.isclose(
-            np.linalg.norm(surface_normal), 1.0, atol=1e-5
-            ), "Surface normal vector must be normalized."
+        if not np.isclose(np.linalg.norm(surface_normal), 1.0, atol=1e-5):
+            raise ValueError("Surface normal vector must be normalized.")
         self.surface_normal = surface_normal
         self.OER_catalyst_study = OER_catalyst_study
 
-        # Save original slab - to store site atributes:
+        # Save original slab - to store site attributes:
         self.original_slab = input_surface.copy()
 
         # Initialize properties list:
@@ -111,8 +107,8 @@ class OER_surface_study:
         self.base_surface_relaxed = None
         self.add_sites_df_relaxed = None
         
-        # This lock is for preventing futher calculations (add-site 
-        # studies) if a non-continuous relaxed surface is been provided.
+        # This lock prevents further calculations (add-site studies)
+        # if a non-continuous relaxed surface has been provided.
         self.study_locked = False
 
         self.relaxed_surface_add_sites_studies = {}
@@ -121,7 +117,7 @@ class OER_surface_study:
     def get_non_relaxed_surface(self) -> Atoms:
         return self.base_surface_non_relaxed.copy()
 
-    def get_relaxed_surface(self) -> Atoms | None:
+    def get_relaxed_surface(self) -> Atoms:
         if self.base_surface_relaxed is None:
             raise ValueError("No relaxed surface has been provided " \
                              "yet. It needs to be set by calling " \
@@ -160,7 +156,7 @@ class OER_surface_study:
         if self.base_surface_relaxed is not None:
             raise ValueError("A relaxed surface has already been "
             "provided for this surface study. Providing a new relaxed "\
-            "surface at this stage would breake the validity of any " \
+            "surface at this stage would break the validity of any " \
             "downstream analysis (e.g. adsorption sites and energies)")
         
         # Test if the provided surface is consistent with the 
@@ -192,8 +188,8 @@ class OER_surface_study:
             self.base_surface_relaxed = surface.copy()
 
         # Return bool on whether the surface is continuous or not. 
-        # Significant for determining if futher computations/analasis 
-        # sould be carried out for this surface study:
+        # Significant for determining if further computations/analysis
+        # should be carried out for this surface study:
         return not self.study_locked
             
     def _add_site_data(self, 
@@ -216,22 +212,22 @@ class OER_surface_study:
         
         if self.add_sites_df_relaxed is not None:
             raise ValueError("Adsorption sites for the relaxed " \
-            "surface have already been determined And may not be " \
+            "surface have already been determined and may not be " \
             "overwritten.")
         if self.base_surface_relaxed is None:
             raise ValueError("No relaxed surface has been provided " \
             "yet. It needs to be set by calling " \
             "'set_relaxed_base_surface' method.")
         
-        structrue = AseAtomsAdaptor.get_structure(
+        structure = AseAtomsAdaptor.get_structure(
             self.base_surface_relaxed)
         
-        structrue.add_site_property('bulk-default-coord',
+        structure.add_site_property('bulk-default-coord',
                                     self.original_slab.site_properties\
                                     ['bulk-default-coord'])
     
         df, atoms = determine_adsorption_sites(
-            structrue,
+            structure,
             normal_vector = self.surface_normal,
             top_layer_tol = top_layer_tol,
             only_reduced_coord_O_sites = only_reduced_coord_O_sites
@@ -258,11 +254,13 @@ class OER_surface_study:
         site_row = self.add_sites_df_relaxed[
             self.add_sites_df_relaxed['Site index'] == index
         ]
+        # TODO: Add explicit check that `site_row` is non-empty before
+        # using `values[0]` below to avoid `IndexError`.
         pos = site_row['position'].values[0]
         site_type = site_row['site type'].values[0]
         if site_type not in ['on-top', 'lattice O']:
             raise ValueError(f"Unknown site type: {site_type}"\
-                "No methoded are implemented for this type")
+                "No methods are implemented for this type")
         
         atoms = self.base_surface_relaxed.copy()
         atoms[int(site_row['atom_index'].values[0])].tag = 3 # ad-site tag
@@ -291,25 +289,13 @@ class OER_surface_study:
             if study is None:
                 continue
 
-            # Test if enough energies are available:
             energies_dict = study.get_adsorption_site_energies()
-            num_none_Es = 0
-            flag_continue = False
-            for energy in energies_dict.values():
-                if energy is None:
-                    num_none_Es += 1
-                if num_none_Es > 2: # there only exist 1 energy
-                    flag_continue = True
-                    break
-
-            # If not enough energies are available, skip this row:
-            if flag_continue:
-                continue
+            E_pure = energies_dict.get("clean_surface_energy", None)
             
             for species in ['O', 'OH']:
                 energy_key = f"{species}_adsorbed_energy"
-                E = energies_dict.get(energy_key, None)
-                if E is not None:
+                E_add = energies_dict.get(energy_key, None)
+                if E_pure is not None and E_add is not None:
                     G_approx, G = self._compute_adsorption_free_energies(
                         species, energies_dict,
                         default_energies_and_corrections
@@ -337,8 +323,13 @@ class OER_surface_study:
 
         if species == 'O':
             G_approx = G_adsorbed_approx + 2*G_H - G_H2O
-        if species == 'OH':
+        elif species == 'OH':
             G_approx = G_adsorbed_approx + G_H - G_H2O
+        else:
+            raise ValueError(
+                f"Unsupported species for adsorption free energy: "
+                f"{species}"
+            )
             
         return G_approx, None  # Placeholder for now
 

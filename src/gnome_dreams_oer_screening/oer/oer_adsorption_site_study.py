@@ -68,8 +68,6 @@ class OER_adsorption_site_study:
         self.OH_init_atoms = None
         self.relaxed_OH_atoms = None
         self.accepted_relaxed_OH_pairs = []
-        self.study_lock = False
-        self.lock_reason = None
         
     def get_atoms_for_O_calc(self) -> Atoms:
         return self.atoms_for_O_calc.copy()
@@ -162,6 +160,7 @@ class OER_adsorption_site_study:
                 f"{equal_results[1]}"
             )
       
+        # Eenergy provided or can be obtained via relaxed atoms:
         if energy is not None:
             E = energy
         else:
@@ -174,6 +173,7 @@ class OER_adsorption_site_study:
             
         self.relaxed_O_atoms = atoms.copy()
 
+        # Set energy, depending on the site type:
         if self.site_type == 'on-top':
             self.energies_dict['O_adsorbed_energy'] = E
         elif self.site_type == 'lattice O':
@@ -213,7 +213,7 @@ class OER_adsorption_site_study:
         """
 
         if self.OH_init_atoms is not None:
-            return self.OH_init_atoms.copy()
+            return [atoms.copy() for atoms in self.OH_init_atoms]
 
         if self.relaxed_O_atoms is None and self.site_type == 'on-top':
             raise RuntimeError("Relaxed O-adsorbed structure has not" \
@@ -281,13 +281,13 @@ class OER_adsorption_site_study:
 
         self.OH_init_atoms = OH_init_atoms
 
-        return OH_init_atoms
+        return [atoms.copy() for atoms in self.OH_init_atoms]
 
     def set_relaxed_OH_calc(
         self, 
         atoms_list: Atoms | list[Atoms],
         energies: list[float] | None = None
-        ) -> bool:
+        ) -> tuple[bool, str | None]:
         """
         Validate and store relaxed OH structures for this site study.
 
@@ -308,9 +308,11 @@ class OER_adsorption_site_study:
                 are read from each Atoms object.
 
         Returns:
-            bool
-                True if at least one structure from this call was
-                accepted and stored; otherwise False.
+            tuple[bool, str | None]
+                A `(success, message)` tuple. `success` is True if at
+                least one structure from this call was accepted and
+                stored; otherwise False. `message` is None on success
+                and contains the rejection cause on failure.
 
         Raises:
             RuntimeError:
@@ -380,17 +382,44 @@ class OER_adsorption_site_study:
             
         # --- Only keep accepted OH structures for this site study: ----
         accepted_pairs = []
+        rejected_counts = {
+            "disconnected": 0,
+            "drifted": 0,
+            "dissociated": 0,
+        }
         for atoms, E in structure_energy_pairs:
             if not are_all_atoms_connected(atoms):
+                rejected_counts["disconnected"] += 1
                 continue
             if not self.is_adsorbate_near_site(atoms):
+                rejected_counts["drifted"] += 1
                 continue
             if not self.is_OH_adsorbate_intact(atoms):
+                rejected_counts["dissociated"] += 1
                 continue
             accepted_pairs.append((atoms.copy(), E))
 
         if len(accepted_pairs) == 0:
-            return False
+            reason_parts = []
+            if rejected_counts["disconnected"] > 0:
+                reason_parts.append(
+                    f"{rejected_counts['disconnected']} disconnected"
+                )
+            if rejected_counts["drifted"] > 0:
+                reason_parts.append(
+                    f"{rejected_counts['drifted']} drifted from site"
+                )
+            if rejected_counts["dissociated"] > 0:
+                reason_parts.append(
+                    f"{rejected_counts['dissociated']} dissociated"
+                )
+            reason = ", ".join(reason_parts)
+            message = (
+                "No relaxed OH structures were accepted: "
+                + reason
+                + "."
+            )
+            return False, message
 
         self.accepted_relaxed_OH_pairs.extend(accepted_pairs)
         best_atoms, best_energy = min(
@@ -400,5 +429,5 @@ class OER_adsorption_site_study:
         self.relaxed_OH_atoms = best_atoms.copy()
         self.energies_dict['OH_adsorbed_energy'] = best_energy
 
-        return True
+        return True, None
         

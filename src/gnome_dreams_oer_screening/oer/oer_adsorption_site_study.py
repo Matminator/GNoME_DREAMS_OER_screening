@@ -1,6 +1,8 @@
+import site
+
 import numpy as np
 import pandas as pd
-from ase import Atoms
+from ase import Atoms, atoms
 from ase.geometry import find_mic
 
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
@@ -63,13 +65,14 @@ class OER_adsorption_site_study:
         
         self.energies_dict = energies_dict
         self.relaxed_O_atoms = None
+        self.OH_init_atoms = None
         self.relaxed_OH_atoms = None
+        self.accepted_relaxed_OH_pairs = []
+        self.study_lock = False
+        self.lock_reason = None
         
     def get_atoms_for_O_calc(self) -> Atoms:
         return self.atoms_for_O_calc.copy()
-    
-
-# ------ test if atoms provided makes sence... <<<<<<<<<<<<<<<<<<-------- TODO
 
     def _get_adsorbed_O_index(self) -> int:
         if self.site_type == "on-top":
@@ -121,7 +124,6 @@ class OER_adsorption_site_study:
         drift_distance = float(np.linalg.norm(displacement))
         return drift_distance <= max_site_drift
 
-
     def is_OH_adsorbate_intact(
         self,
         atoms: Atoms,
@@ -146,7 +148,6 @@ class OER_adsorption_site_study:
 
         d_OH = float(atoms.get_distance(O_index, H_index, mic=True))
         return d_OH <= max_OH_distance
-    
     
     def set_relaxed_O_calc(self, atoms: Atoms,
                                 energy: float | None = None) -> None:
@@ -178,9 +179,8 @@ class OER_adsorption_site_study:
         elif self.site_type == 'lattice O':
             self.energies_dict['clean_surface_energy'] = E
         else:
-            raise ValueError("Invalied adsorbtion site type")       
+            raise ValueError("Invalid adsorption site type")       
             
-
     def get_adsorption_site_energies(self) -> dict[str, float | None]:
         return self.energies_dict.copy()
     
@@ -211,6 +211,9 @@ class OER_adsorption_site_study:
         Returns:
             list[Atoms]: Three candidate OH initialization structures.
         """
+
+        if self.OH_init_atoms is not None:
+            return self.OH_init_atoms.copy()
 
         if self.relaxed_O_atoms is None and self.site_type == 'on-top':
             raise RuntimeError("Relaxed O-adsorbed structure has not" \
@@ -276,22 +279,126 @@ class OER_adsorption_site_study:
             oh_atoms += Atoms('H', positions=[H_pos], tags=[4])
             OH_init_atoms.append(oh_atoms)
 
+        self.OH_init_atoms = OH_init_atoms
+
         return OH_init_atoms
 
-    def set_relaxed_OH_calc(self, atoms: Atoms, energy: float = None
-                            ) -> None:
+    def set_relaxed_OH_calc(
+        self, 
+        atoms_list: Atoms | list[Atoms],
+        energies: list[float] | None = None
+        ) -> bool:
+        """
+        Validate and store relaxed OH structures for this site study.
 
-        if energy is not None:
-            E = energy
+        Accepted relaxed structures are accumulated across calls. A
+        structure is accepted only if it is system-consistent with the
+        initialized OH setup, fully connected, still near the target
+        adsorption site, and has an intact OH adsorbate.
+
+        The method updates `self.relaxed_OH_atoms` and
+        `self.energies_dict['OH_adsorbed_energy']` to the lowest-energy
+        accepted structure seen so far (including previous calls).
+
+        Args:
+            atoms_list: Atoms | list[Atoms]
+                One or more relaxed OH structures to evaluate.
+            energies: list[float] | None
+                Energies matching `atoms_list` order. If None, energies
+                are read from each Atoms object.
+
+        Returns:
+            bool
+                True if at least one structure from this call was
+                accepted and stored; otherwise False.
+
+        Raises:
+            RuntimeError:
+                If required prior setup (e.g. on-top relaxed O or OH
+                initialization structures) is missing.
+            ValueError:
+                If inputs are malformed or energies cannot be obtained.
+            StructureConsistencyError:
+                If any provided structure does not match the expected
+                OH system composition/order/tags.
+        """
+
+        if self.relaxed_O_atoms is None and self.site_type == 'on-top':
+            raise RuntimeError(
+                "Relaxed O-adsorbed structure has not been set yet. "
+                "This DFT calculation must be run and set before "
+                "setting relaxed OH structures for an \"on-top\" site."
+            )
+
+        # Ensure correct format of atoms_list:
+        if isinstance(atoms_list, Atoms):
+            atoms_list = [atoms_list.copy()]
         else:
-            try:
-                E = atoms.get_potential_energy()
-            except:
-                raise ValueError("Energy not provided and could not " \
-                                 "be obtained from the relaxed atoms"
-                                 "object.")
-            
-        self.relaxed_OH_atoms = atoms.copy()
+            atoms_list = [atoms.copy() for atoms in atoms_list]
 
-        self.energies_dict['OH_adsorbed_energy'] = E
+        # --- Basic checks on the provided structures and energies: ----
+        if len(atoms_list) == 0:
+            raise ValueError(
+                "atoms_list must contain at least one structure."
+            )
+
+        if self.OH_init_atoms is None:
+            raise RuntimeError(
+                "Initial OH structures have not been set yet."
+            )
+
+        if energies is not None:
+            if len(energies) != len(atoms_list):
+                raise ValueError(
+                    "If provided, energies must have the same length " \
+                    "as atoms_list."
+                )
+            structure_energy_pairs = [
+                (atoms, float(E))
+                for atoms, E in zip(atoms_list, energies)
+            ]
+        else:
+            structure_energy_pairs = []
+            for atoms in atoms_list:
+                try:
+                    E = float(atoms.get_potential_energy())
+                except:
+                    raise ValueError(
+                        "Energy not provided and could not be "
+                        "obtained from the relaxed atoms object."
+                    )
+                structure_energy_pairs.append((atoms, E))
+
+        # --- run baseline sanity checks on atoms, in atoms_list: ------
+        for atoms, _ in structure_energy_pairs:
+            equal_res = are_systems_equal(atoms, self.OH_init_atoms[0])
+            if not equal_res[0]:
+                raise StructureConsistencyError("The provided " \
+                    "relaxed_OH structure is not a relaxed version of" \
+                    " the initial OH structure. Details: "
+                    + equal_res[1])
+            
+        # --- Only keep accepted OH structures for this site study: ----
+        accepted_pairs = []
+        for atoms, E in structure_energy_pairs:
+            if not are_all_atoms_connected(atoms):
+                continue
+            if not self.is_adsorbate_near_site(atoms):
+                continue
+            if not self.is_OH_adsorbate_intact(atoms):
+                continue
+            accepted_pairs.append((atoms.copy(), E))
+
+        if len(accepted_pairs) == 0:
+            return False
+
+        self.accepted_relaxed_OH_pairs.extend(accepted_pairs)
+        best_atoms, best_energy = min(
+            self.accepted_relaxed_OH_pairs,
+            key=lambda pair: pair[1],
+        )
+        self.relaxed_OH_atoms = best_atoms.copy()
+        self.energies_dict['OH_adsorbed_energy'] = best_energy
+
+        return True
         

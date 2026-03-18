@@ -45,9 +45,9 @@ class OER_surface_study:
         OER_catalyst_study: OER_catalyst_study
             The OER_catalyst_study object to which this surface study
             belongs.
-        input_surface: Atoms | Slab
-            The surface structure to be studied, either as an ASE Atoms
-            object or a Pymatgen Slab object.
+        input_surface: Slab
+            The surface structure to be studied as a Pymatgen Slab
+            object.
         normal_vector: np.ndarray | None
             The normal vector of the surface. If None, the normal vector
             will be inferred from the input_surface object (if
@@ -246,6 +246,11 @@ class OER_surface_study:
             raise ValueError("No adsorption sites have been " \
             "determined for the relaxed surface yet. They " \
             "need to be set by calling 'determine_adsorption_sites'")
+        if index not in self.add_sites_df_relaxed['Site index'].values:
+            raise ValueError(
+                f"No adsorption site with index {index} exists for "
+                "this surface study."
+            )
         if index in self.relaxed_surface_add_sites_studies:
             raise ValueError("Adsorption site study for index " \
             f"{index} on the relaxed surface has already been " \
@@ -254,9 +259,6 @@ class OER_surface_study:
         site_row = self.add_sites_df_relaxed[
             self.add_sites_df_relaxed['Site index'] == index
         ]
-        # TODO: Add explicit check that index exists in
-        # initialize_adsorption_site_study before values[0] access
-        # (avoid IndexError).
         pos = site_row['position'].values[0]
         site_type = site_row['site type'].values[0]
         if site_type not in ['on-top', 'lattice O']:
@@ -264,7 +266,8 @@ class OER_surface_study:
                 "No methods are implemented for this type")
         
         atoms = self.base_surface_relaxed.copy()
-        atoms[int(site_row['atom_index'].values[0])].tag = 3 # ad-site tag
+        # Add tag 3 to the adsorption site atom:
+        atoms[int(site_row['atom_index'].values[0])].tag = 3
         
         self.relaxed_surface_add_sites_studies[index] = \
             OER_adsorption_site_study(atoms, pos, index,
@@ -368,7 +371,7 @@ class OER_surface_study:
         else:
             return self.non_relaxed_surface_add_sites_studies
 
-    def get_adsorption_sites_df(self) -> pd.DataFrame:
+    def get_adsorption_sites_df(self) -> pd.DataFrame | None:
         if self.add_sites_df_relaxed is None:
             return None
         return self.add_sites_df_relaxed.copy()

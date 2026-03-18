@@ -38,6 +38,25 @@ warnings.filterwarnings(
 )
 
 
+
+"""
+TODO:
+should the terminations builder not fail hard, when some terminations
+may be accetable, but some fail to generate?
+
+TODO: 
+Need to add surface atoms to the terminations ranking (at least when 
+displayed or returnd for displayed...)
+"""
+
+
+
+
+
+
+
+
+
 class OER_catalyst_study:
     """
     The core class for ranking and generating surfaces from a bulk
@@ -362,7 +381,7 @@ class OER_catalyst_study:
         if self.termination_ranking_df is None:
             self.termination_ranking_df = pd.DataFrame(columns=[
                 "Miller indices", "Termination index", 'Score', 
-                'Normalized score'])
+                'Normalized score', "Surface atoms:"])
         
     def predict_most_likely_surfaces(self, 
         max_miller: int = 1,
@@ -454,7 +473,8 @@ class OER_catalyst_study:
                     "Miller indices": miller_indices,
                     "Termination index": N_ts,
                     "Score": float('nan'),
-                    "Normalized score": 0
+                    "Normalized score": 0,
+                    "Surface atoms:": []
                 }
             else:                
                 for slab in slabs:       
@@ -499,12 +519,22 @@ class OER_catalyst_study:
                     # Score, equal to coordination difference per area:
                     score = corrd_diff/A_surface
 
+                    # Determine top-layer adsorption-site elements:
+                    ad_sites_df, _ = determine_adsorption_sites(slab)
+                    surface_atoms = [
+                        element
+                        for element in
+                        ad_sites_df['ad site element'].tolist()
+                        if element != 'N/A'
+                    ]
+
                     N_ts = len(termination_ranking_df)
                     termination_ranking_df.loc[N_ts] = {
                         "Miller indices": miller_indices,
                         "Termination index": N_ts,
                         "Score": score,
-                        "Normalized score": 0
+                        "Normalized score": 0,
+                        "Surface atoms:": surface_atoms
                     }
                     self.terminations[N_ts] = slab
     

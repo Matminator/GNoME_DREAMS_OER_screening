@@ -15,8 +15,10 @@ from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
 # --- Initilization tests of the OER_catalyst_study class: -------------
 @pytest.mark.mini
 def test_setup_1():
-
     atoms = Atoms('Fe', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
+    # Now needed for eqivalence, since tag is set in the initialization:
+    for atom in atoms:
+        atom.tag = 0
 
     oer_study =OER_catalyst_study(
         atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
@@ -32,8 +34,10 @@ def test_setup_1():
 
 @pytest.mark.mini
 def test_setup_2():
-
     atoms = Atoms('Ti', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
+    # Now needed for eqivalence, since tag is set in the initialization:
+    for atom in atoms:
+        atom.tag = 0
 
     oer_study =OER_catalyst_study(
         atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
@@ -203,8 +207,6 @@ def test_TiO2_r_110_surface_score_calculation_all_coordination(
     score_diff = abs(score - expected_score)
     assert score_diff < 1e-6, f"Expected score: {expected_score}, but" \
         f" got {score}"
-
-
 
 # --- Testing timeout and assoriated flag in _build_surfaces: ----------
 @pytest.mark.mini

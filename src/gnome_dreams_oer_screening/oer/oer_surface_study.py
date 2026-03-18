@@ -18,6 +18,11 @@ from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
     StructureConsistencyError,
 )
 
+
+class SurfaceStudyLockedError(RuntimeError):
+    """Raised when a locked surface study blocks further analysis."""
+
+
 class OER_surface_study:
     """
     Class for determining surface adsorption sites. This class is 
@@ -74,8 +79,10 @@ class OER_surface_study:
                                             input_surface, normal_vector
                                             )
 
-        if not np.isclose(np.linalg.norm(surface_normal), 1.0, atol=1e-5):
-            raise ValueError("Surface normal vector must be normalized.")
+        if not np.isclose(np.linalg.norm(surface_normal), 1.0,
+                            atol=1e-5):
+            raise ValueError("Surface normal vector must be " \
+                "normalized.")
         self.surface_normal = surface_normal
         self.OER_catalyst_study = OER_catalyst_study
 
@@ -105,6 +112,7 @@ class OER_surface_study:
         self.base_surface_non_relaxed = base_surface
         self.add_sites_df_non_relaxed = None
         self.base_surface_relaxed = None
+        self.relaxed_surface_energy = None
         self.add_sites_df_relaxed = None
         
         # This lock prevents further calculations (add-site studies)
@@ -128,7 +136,7 @@ class OER_surface_study:
                                  energy: float | None = None,
                                  ) -> bool:
         """
-        set the relaxed surface structure for this surface study. This 
+        Set the relaxed surface structure for this surface study. This 
         is for later use in the determination of adsorption sites and
         adsorption energies.
 
@@ -142,16 +150,9 @@ class OER_surface_study:
         Returns:
         bool
             Whether the provided relaxed surface is a single connected
-            system. If False, the surface study is locked and further 
-            computations (e.g. adsorption site studies) should not be 
-            carried out for this surface study.
+            system. If False, the surface study is locked until a valid
+            relaxed surface is provided.
         """
-
-        # make sure the study is not locked due to a previously provided
-        # non-continuous relaxed surface:
-        if self.study_locked:
-            raise ValueError("The surface study is locked due to a "
-            "previously provided non-continuous relaxed surface.")
 
         if self.base_surface_relaxed is not None:
             raise ValueError("A relaxed surface has already been "
@@ -181,10 +182,11 @@ class OER_surface_study:
                 try:
                     self.relaxed_surface_energy = \
                         surface.get_potential_energy()
-                except:
+                except Exception as exc:
                     raise ValueError("Energy not provided and could " \
-                        "not be obtained from the relaxed atoms")
+                        "not be obtained from the relaxed atoms") from exc
                 
+            self.study_locked = False
             self.base_surface_relaxed = surface.copy()
 
         # Return bool on whether the surface is continuous or not. 
@@ -210,6 +212,12 @@ class OER_surface_study:
             only_reduced_coord_O_sites: bool = False
             ) -> None:
         
+        if self.study_locked:
+            raise SurfaceStudyLockedError(
+                "Adsorption sites cannot be determined because this "
+                "surface study is locked due to a previously provided "
+                "non-continuous relaxed surface."
+            )
         if self.add_sites_df_relaxed is not None:
             raise ValueError("Adsorption sites for the relaxed " \
             "surface have already been determined and may not be " \
@@ -222,6 +230,7 @@ class OER_surface_study:
         structure = AseAtomsAdaptor.get_structure(
             self.base_surface_relaxed)
         
+        # This is needed for determining under-coordinated sites:
         structure.add_site_property('bulk-default-coord',
                                     self.original_slab.site_properties\
                                     ['bulk-default-coord'])
@@ -263,7 +272,7 @@ class OER_surface_study:
         site_type = site_row['site type'].values[0]
         if site_type not in ['on-top', 'lattice O']:
             raise ValueError(f"Unknown site type: {site_type}"\
-                "No methods are implemented for this type")
+                " No methods are implemented for this type")
         
         atoms = self.base_surface_relaxed.copy()
         # Add tag 3 to the adsorption site atom:

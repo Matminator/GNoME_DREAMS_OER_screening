@@ -78,6 +78,8 @@ class OER_catalyst_study:
                  OH_OOH_scaling_intercept: float = 3.2
                  ):
         
+         # Avoid mutations outside of this class:
+        init_atoms = init_atoms.copy()
         for atom in init_atoms:
             atom.tag = 0 # Ensure all tags are set to 0
 

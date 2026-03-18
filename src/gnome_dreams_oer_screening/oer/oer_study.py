@@ -179,16 +179,16 @@ class OER_catalyst_study:
             self.species_energies['OOH_ad_correction'] = \
                 OOH_ad_correction
 
-    def get_gas_and_energy_corrections(self) -> dict[str, float]:
+    def get_gas_and_energy_corrections(self) -> dict[str, float | None]:
         return self.species_energies.copy()
 
-    def get_bulk_atoms(self) -> Atoms:
+    def get_bulk_atoms(self) -> Atoms | None:
         if self.bulk_atoms is None:
             return None
         else:
             return self.bulk_atoms.copy()
     
-    def get_bulk_structure(self) -> Structure:
+    def get_bulk_structure(self) -> Structure | None:
         if self.bulk_structure is None:
             return None
         else:
@@ -381,6 +381,14 @@ class OER_catalyst_study:
         timeout: int = 15*60,
         ) -> None:
 
+        if self.bulk_atoms is None or self.bulk_structure is None:
+            raise RuntimeError(
+                "Cannot rank terminations because the relaxed bulk "
+                "structure is not set. Set it with "
+                "`set_relaxed_structure(...)` or initialize the study "
+                "with `use_init_as_relaxed_bulk=True`."
+            )
+
         if max_diff_dict is None:
             max_diff_dict = {}
         if ignore_stoichiometry_of_species is None:
@@ -525,7 +533,7 @@ class OER_catalyst_study:
         self.termination_ranking_df = df
 
     def get_termination_rankings(self, normalize_scores = True
-                                     ) -> pd.DataFrame:
+                                     ) -> pd.DataFrame | None:
         out = None
         if self.termination_ranking_df is not None:
             if normalize_scores:

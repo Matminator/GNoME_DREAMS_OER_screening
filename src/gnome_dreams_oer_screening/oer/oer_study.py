@@ -53,7 +53,7 @@ class OER_catalyst_study:
     adsorption energies.
 
     Args:
-        init_bulk (Atoms): the unrelaxed bulk structure of the catalyst.
+        init_atoms (Atoms): the unrelaxed bulk structure of the catalyst.
         H2O_gas_free_energy (float): Free energy of H2O in gas phase.
         H2_gas_free_energy (float): Free energy of H2 in gas phase.
         O2_gas_free_energy (float, optional): Free energy of O2 in gas
@@ -69,11 +69,10 @@ class OER_catalyst_study:
         initial bulk structure as the relaxed bulk structure.
     """
 
-
-    def __init__(self, init_atoms = Atoms,    
-                 H2O_gas_free_energy = float,
-                 H2_gas_free_energy = float,
-                 O2_gas_free_energy: float = None,
+    def __init__(self, init_atoms: Atoms,
+                 H2O_gas_free_energy: float,
+                 H2_gas_free_energy: float,
+                 O2_gas_free_energy: float | None = None,
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
@@ -235,8 +234,8 @@ class OER_catalyst_study:
     def _build_surfaces(self, 
             miller_indices: tuple[int, int, int],
             stoichiometry_tolerance: float = 0.1,
-            max_diff_dict: dict = {},
-            ignore_stoichiometry_of_species: list[str] = [],
+            max_diff_dict: dict | None = None,
+            ignore_stoichiometry_of_species: list[str] | None = None,
             all_species_present: bool = True,
             symmetrize: bool = True,
             select_closest_O_stoichiometry: bool = True,
@@ -248,13 +247,18 @@ class OER_catalyst_study:
             max_layers: int = 6,
             timeout: int = 15*60,  # Default timeout of 15 minutes
             **kwargs
-            ) -> Atoms | None:
+            ) -> list[Slab]:
 
         if self.failed_slab_generation:
             raise RuntimeError("Previous slab generation attempt " \
             "failed due to timeout. Slab generation will not be " \
             "attempted again. It is not possible to generate " \
             "surfaces for this bulk structure.")
+
+        if max_diff_dict is None:
+            max_diff_dict = {}
+        if ignore_stoichiometry_of_species is None:
+            ignore_stoichiometry_of_species = []
 
         # Log time, to be used for timeout handling:
         start_time = time.time()
@@ -361,8 +365,8 @@ class OER_catalyst_study:
         method: Literal['all', 'disregard-coord-of-O',
                          'O-coordination'] = 'all',
         stoichiometry_tolerance: float = 0.2,
-        max_diff_dict: dict = {},
-        ignore_stoichiometry_of_species: list[str] = [],
+        max_diff_dict: dict | None = None,
+        ignore_stoichiometry_of_species: list[str] | None = None,
         all_species_present: bool = True,
         symmetrize: bool = True,
         select_closest_O_stoichiometry: bool = True,
@@ -372,13 +376,14 @@ class OER_catalyst_study:
         max_atoms: int = 120,
         vacuum: float = 1,
         max_layers: int = 6,
+        timeout: int = 15*60,
         ) -> None:
-        """
-        TEMP-DOC
-        """
 
-        ### <<<---------------------------------------------------------- NEED A TIME OUT!
-
+        if max_diff_dict is None:
+            max_diff_dict = {}
+        if ignore_stoichiometry_of_species is None:
+            ignore_stoichiometry_of_species = []
+        
         # Build method dict for later reference:
         new_ranking_method = {
             'method': method,
@@ -429,8 +434,9 @@ class OER_catalyst_study:
         for miller_indices in self.distinct_millers:
 
             slabs = self._build_surfaces(miller_indices, 
+                                         timeout = timeout,
                                          **new_ranking_method)
-            if slabs is None:
+            if len(slabs) == 0:
                 N_ts = len(termination_ranking_df)
                 termination_ranking_df.loc[N_ts] = {
                     "Miller indices": miller_indices,
@@ -530,6 +536,12 @@ class OER_catalyst_study:
             top_layer_tol: float = 1.5,
             only_reduced_coord_O_sites: bool = False
             ) -> (pd.DataFrame, Atoms):
+        if termination_index not in self.terminations:
+            raise ValueError(
+                "Invalid termination_index: "
+                f"{termination_index}. No generated termination exists "
+                "for this index."
+            )
         return determine_adsorption_sites(
             self.terminations[termination_index],
             top_layer_tol=top_layer_tol,
@@ -573,6 +585,13 @@ class OER_catalyst_study:
                 "Use force=True to overwrite the existing study."
                 "!!! DOING THIS IS HIGHLY DISCOURAGED !!!")
 
+        if termination_index not in self.terminations:
+            raise ValueError(
+                "Invalid termination_index: "
+                f"{termination_index}. No generated termination exists "
+                "for this index."
+            )
+
         # Doing sanity check if miller indices are provided:
         if miller_indices is not None:
             df = self.termination_ranking_df
@@ -581,7 +600,6 @@ class OER_catalyst_study:
             if termination_index not in millers_terminations_indecies:
                 raise ValueError("The provided termination_index does "\
                 "not correspond to the provided miller_indices.")
-            
         slab = self.terminations[termination_index]
         oer_surface_study = OER_surface_study(self, slab,
                 fixed_bottom_half = fixed_bottom_half, vacuum = vacuum)

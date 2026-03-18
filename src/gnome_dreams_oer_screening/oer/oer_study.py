@@ -8,8 +8,7 @@ from ase import Atoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab, Structure
 from pymatgen.core.surface import (
-    Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
-from ase.neighborlist import NeighborList, natural_cutoffs
+    get_symmetrically_distinct_miller_indices, SlabGenerator)
 
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
     eval_stoichiometry_diff,get_stoichiometry_diff, 
@@ -29,7 +28,7 @@ from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
 )
 
 # Suppress specific warnings from pymatgen about too many sites removed.
-# These warnings can occur during slab generation and are handled be 
+# These warnings can occur during slab generation and are handled by
 # the code logic, so they can be safely ignored.
 import warnings
 warnings.filterwarnings(
@@ -41,8 +40,8 @@ warnings.filterwarnings(
 
 class OER_catalyst_study:
     """
-    The core class for managing for ranking and generating surfaces from
-    a bulk structure, for the purpose of OER catalyst screening. All 
+    The core class for ranking and generating surfaces from a bulk
+    structure for OER catalyst screening. All
     data related to computation of adsorption energies is stored in this
     class. Surfaces are initialized as OER_surface_study instances, via 
     the method 'initialize_oer_surface_study', and stored in a 
@@ -64,7 +63,6 @@ class OER_catalyst_study:
         made to the DFT OH* adsorption energy.
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
-        bulk_energy (float, optional): Energy of the bulk structure.
         use_init_as_relaxed_bulk (bool, optional): Whether to use the
         initial bulk structure as the relaxed bulk structure.
     """
@@ -155,12 +153,12 @@ class OER_catalyst_study:
         self.bulk_atoms = relaxed_bulk_atoms
 
     def set_energies(self,
-            H2O_gas_free_energy: float = None,
-            H2_gas_free_energy: float = None,
-            O2_gas_free_energy: float = None,
-            O_ad_correction: float = None,
-            OH_ad_correction: float = None,
-            OOH_ad_correction: float = None,
+            H2O_gas_free_energy: float | None = None,
+            H2_gas_free_energy: float | None = None,
+            O2_gas_free_energy: float | None = None,
+            O_ad_correction: float | None = None,
+            OH_ad_correction: float | None = None,
+            OOH_ad_correction: float | None = None,
             ) -> None:
         if H2O_gas_free_energy is not None:
             self.species_energies['H2O_gas_free_energy'] = \
@@ -254,6 +252,10 @@ class OER_catalyst_study:
             "failed due to timeout. Slab generation will not be " \
             "attempted again. It is not possible to generate " \
             "surfaces for this bulk structure.")
+        
+        if max_layers < 3:
+            raise ValueError("max_layers must be at least 3 to allow"
+                " for reasonable slab generation attempts.")
 
         if max_diff_dict is None:
             max_diff_dict = {}
@@ -286,6 +288,7 @@ class OER_catalyst_study:
             slabs = sg.get_slabs(symmetrize = symmetrize)
             
             # Check if any slabs were generated, if not, retry:
+
             if len(slabs) == 0:
                 num_layers += 1
                 continue
@@ -313,11 +316,10 @@ class OER_catalyst_study:
                 num_layers += 1
                 continue
             
-            break # Surfaces was generated successfully, exit loop
-        
-    
+            break  # Surfaces were generated successfully; exit loop.
 
-        # <<<< --------------------------------------------------------- MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS
+        # Removing slabs that contain too many atoms or are too thick.
+        # NOTE: could consider a more refined approach in the future.
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]
         slabs = [slab for slab in slabs if 
                     compute_slab_thickness(slab)
@@ -456,7 +458,7 @@ class OER_catalyst_study:
                     tol = 1e-5
                     if np.abs(np.dot(slab_normal, a_1)) > tol or \
                           np.abs(np.dot(slab_normal, a_2)) > tol:
-                        raise RuntimeError("Failed to vectors in plane " \
+                        raise RuntimeError("Failed to find vectors in plane " \
                                            "of the surface.")
                     A_surface = np.linalg.norm(np.cross(cell[0], 
                                                         cell[1]))
@@ -469,7 +471,7 @@ class OER_catalyst_study:
 
                     # Get the corresponding bulk coordination numbers
                     # for the atoms in the top half of the slab (i.e.,
-                    # what the cordination numbers would have been in 
+                    # what the coordination numbers would have been in
                     # the bulk):
                     corresponding_bulk_coords = np.array( \
                         slab.site_properties.get('bulk-custom-coord'))
@@ -484,7 +486,7 @@ class OER_catalyst_study:
                     corrd_diff = np.sum(coords_numbers - 
                                         corresponding_bulk_coords)
                     
-                    # Score, euqal to coordination difference per area:
+                    # Score, equal to coordination difference per area:
                     score = corrd_diff/A_surface
 
                     N_ts = len(termination_ranking_df)
@@ -536,12 +538,14 @@ class OER_catalyst_study:
             top_layer_tol: float = 1.5,
             only_reduced_coord_O_sites: bool = False
             ) -> (pd.DataFrame, Atoms):
+        
         if termination_index not in self.terminations:
             raise ValueError(
                 "Invalid termination_index: "
                 f"{termination_index}. No generated termination exists "
                 "for this index."
             )
+        
         return determine_adsorption_sites(
             self.terminations[termination_index],
             top_layer_tol=top_layer_tol,
@@ -574,7 +578,7 @@ class OER_catalyst_study:
     
     def initialize_oer_surface_study(self, 
             termination_index: int,
-            miller_indices: tuple[int, int, int] | None = None, 
+            # miller_indices: tuple[int, int, int] | None = None, 
             fixed_bottom_half: bool = True, 
             vacuum = 12,
             force = False) -> None:
@@ -592,14 +596,22 @@ class OER_catalyst_study:
                 "for this index."
             )
 
-        # Doing sanity check if miller indices are provided:
-        if miller_indices is not None:
-            df = self.termination_ranking_df
-            millers_terminations_indecies = df[df['Miller indices'] ==
-                        miller_indices]['Termination index'].values
-            if termination_index not in millers_terminations_indecies:
-                raise ValueError("The provided termination_index does "\
-                "not correspond to the provided miller_indices.")
+        # --- DEPRECATED CODE - WILL BE REMOVED IN THE FUTURE ----------
+
+        # # Do a sanity check if miller indices are provided:
+        # if miller_indices is not None:
+        #     # TODO: If `self.termination_ranking_df` is None here, raise
+        #     # a descriptive ValueError instructing the caller to run
+        #     # `predict_most_likely_surfaces(...)` first.
+        #     df = self.termination_ranking_df
+        #     millers_terminations_indecies = df[df['Miller indices'] ==
+        #                 miller_indices]['Termination index'].values
+        #     if termination_index not in millers_terminations_indecies:
+        #         raise ValueError("The provided termination_index does "\
+        #         "not correspond to the provided miller_indices.")
+
+        # --------------------------------------------------------------
+
         slab = self.terminations[termination_index]
         oer_surface_study = OER_surface_study(self, slab,
                 fixed_bottom_half = fixed_bottom_half, vacuum = vacuum)

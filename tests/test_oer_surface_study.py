@@ -168,9 +168,9 @@ def test_adsorbtion_update_O_adsorption_energies(
     surface_study.update_adsorption_energies()
     df = surface_study.get_adsorption_sites_df()
     for i, row in df.iterrows():
-        diff = row['G_approx(O)'] - 2.46
-        assert abs(diff) < 0.001, f"Expected G_approx(O) = 2.46, got " \
-            f"{row['G_approx(O)']} for site {i} of type {row['site type']}"
+        diff = row['G(O)'] - 2.46
+        assert abs(diff) < 0.001, f"Expected G(O) = 2.46, got " \
+            f"{row['G(O)']} for site {i} of type {row['site type']}"
 
 
 def test_set_relaxed_base_surface_raises_structure_consistency_error(

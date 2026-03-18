@@ -78,6 +78,7 @@ class OER_catalyst_study:
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
                  use_init_as_relaxed_bulk: bool = False,
+                 OH_OOH_scaling_intercept: float = 3.2
                  ):
         
         for atom in init_atoms:
@@ -109,6 +110,7 @@ class OER_catalyst_study:
         self.applied_ranking_method = None
         self.oer_surface_studies = {}
         self.failed_slab_generation = False
+        self.OH_OOH_scaling_intercept = OH_OOH_scaling_intercept
 
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()

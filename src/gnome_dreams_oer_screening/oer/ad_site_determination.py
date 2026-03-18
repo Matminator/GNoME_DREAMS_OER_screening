@@ -175,9 +175,9 @@ def determine_adsorption_sites(
                     df.drop(i, inplace=True)
                     break
 
-    for energy_col in ['G_approx(O)', 'G(O)', 'G_approx(OH)', 
-                        'G(OH)', 'G_approx(OOH)', 'G(OOH)',
-                        'ideal overpotential']:
+    for energy_col in ['G(O)', 'G(OH)', 'G(OOH)',
+                        'ideal overpotential',
+                        'overpotential from OH-OOH scaling relation']:
         df[energy_col] = None
         
     return df, atoms  

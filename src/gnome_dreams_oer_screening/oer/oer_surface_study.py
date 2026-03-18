@@ -309,14 +309,14 @@ class OER_surface_study:
                 energy_key = f"{species}_adsorbed_energy"
                 E_add = energies_dict.get(energy_key, None)
                 if E_pure is not None and E_add is not None:
-                    G_approx, G = self._compute_adsorption_free_energies(
+                    G, _ = self._compute_adsorption_free_energies(
                         species, energies_dict,
                         default_energies_and_corrections
                     )
                 else:
-                    G_approx = None
+                    G = None
 
-                df.loc[index, f"G_approx({species})"] = G_approx
+                df.loc[index, f"G({species})"] = G
 
         self._compute_ideal_overpotentials()
             
@@ -329,22 +329,22 @@ class OER_surface_study:
         E_adsorbed = E_add - E_pure 
         corr = default_energies_and_corrections.get(
             f"{species}_ad_correction")
-        G_adsorbed_approx = E_adsorbed + corr
+        G_adsorbed = E_adsorbed + corr
 
         G_H = default_energies_and_corrections['H2_gas_free_energy'] / 2
         G_H2O = default_energies_and_corrections['H2O_gas_free_energy']
 
         if species == 'O':
-            G_approx = G_adsorbed_approx + 2*G_H - G_H2O
+            G = G_adsorbed + 2*G_H - G_H2O
         elif species == 'OH':
-            G_approx = G_adsorbed_approx + G_H - G_H2O
+            G = G_adsorbed + G_H - G_H2O
         else:
             raise ValueError(
                 f"Unsupported species for adsorption free energy: "
                 f"{species}"
             )
             
-        return G_approx, None  # Placeholder for now
+        return G, None  # Placeholder for now
 
     def _compute_ideal_overpotentials(self) -> None:
         df = self.get_adsorption_sites_df()
@@ -352,8 +352,8 @@ class OER_surface_study:
             return
         
         for index, row in df.iterrows():
-            G_O = row.get("G_approx(O)", None)
-            G_OH = row.get("G_approx(OH)", None)
+            G_O = row.get("G(O)", None)
+            G_OH = row.get("G(OH)", None)
             if G_O is None:
                 continue
             if G_OH is None:

@@ -8,8 +8,7 @@ from ase import Atoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.core.surface import Slab, Structure
 from pymatgen.core.surface import (
-    Slab, get_symmetrically_distinct_miller_indices, SlabGenerator)
-from ase.neighborlist import NeighborList, natural_cutoffs
+    get_symmetrically_distinct_miller_indices, SlabGenerator)
 
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
     eval_stoichiometry_diff,get_stoichiometry_diff, 
@@ -29,7 +28,7 @@ from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
 )
 
 # Suppress specific warnings from pymatgen about too many sites removed.
-# These warnings can occur during slab generation and are handled be 
+# These warnings can occur during slab generation and are handled by
 # the code logic, so they can be safely ignored.
 import warnings
 warnings.filterwarnings(
@@ -39,10 +38,29 @@ warnings.filterwarnings(
 )
 
 
+
+"""
+TODO:
+should the terminations builder not fail hard, when some terminations
+may be accetable, but some fail to generate?
+
+TODO: 
+Need to add surface atoms to the terminations ranking (at least when 
+displayed or returnd for displayed...)
+"""
+
+
+
+
+
+
+
+
+
 class OER_catalyst_study:
     """
-    The core class for managing for ranking and generating surfaces from
-    a bulk structure, for the purpose of OER catalyst screening. All 
+    The core class for ranking and generating surfaces from a bulk
+    structure for OER catalyst screening. All
     data related to computation of adsorption energies is stored in this
     class. Surfaces are initialized as OER_surface_study instances, via 
     the method 'initialize_oer_surface_study', and stored in a 
@@ -53,7 +71,7 @@ class OER_catalyst_study:
     adsorption energies.
 
     Args:
-        init_bulk (Atoms): the unrelaxed bulk structure of the catalyst.
+        init_atoms (Atoms): the unrelaxed bulk structure of the catalyst.
         H2O_gas_free_energy (float): Free energy of H2O in gas phase.
         H2_gas_free_energy (float): Free energy of H2 in gas phase.
         O2_gas_free_energy (float, optional): Free energy of O2 in gas
@@ -64,22 +82,23 @@ class OER_catalyst_study:
         made to the DFT OH* adsorption energy.
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
-        bulk_energy (float, optional): Energy of the bulk structure.
         use_init_as_relaxed_bulk (bool, optional): Whether to use the
         initial bulk structure as the relaxed bulk structure.
     """
 
-
-    def __init__(self, init_atoms = Atoms,    
-                 H2O_gas_free_energy = float,
-                 H2_gas_free_energy = float,
-                 O2_gas_free_energy: float = None,
+    def __init__(self, init_atoms: Atoms,
+                 H2O_gas_free_energy: float,
+                 H2_gas_free_energy: float,
+                 O2_gas_free_energy: float | None = None,
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
                  use_init_as_relaxed_bulk: bool = False,
+                 OH_OOH_scaling_intercept: float = 3.2
                  ):
         
+         # Avoid mutations outside of this class:
+        init_atoms = init_atoms.copy()
         for atom in init_atoms:
             atom.tag = 0 # Ensure all tags are set to 0
 
@@ -108,7 +127,8 @@ class OER_catalyst_study:
         self.terminations = {}
         self.applied_ranking_method = None
         self.oer_surface_studies = {}
-        self.failed_slab_generation = False
+        # self.failed_slab_generation = False
+        self.OH_OOH_scaling_intercept = OH_OOH_scaling_intercept
 
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()
@@ -128,6 +148,9 @@ class OER_catalyst_study:
                 "You will need to create a new OER_catalyst_study " \
                 "instance if you want to use a different relaxed bulk" \
                 " structure")
+        
+        # Make a copy, to avoide mutations outside of this class
+        relaxed_bulk = relaxed_bulk.copy() 
         
         if isinstance(relaxed_bulk, Atoms):
             relaxed_bulk_atoms = relaxed_bulk
@@ -154,12 +177,12 @@ class OER_catalyst_study:
         self.bulk_atoms = relaxed_bulk_atoms
 
     def set_energies(self,
-            H2O_gas_free_energy: float = None,
-            H2_gas_free_energy: float = None,
-            O2_gas_free_energy: float = None,
-            O_ad_correction: float = None,
-            OH_ad_correction: float = None,
-            OOH_ad_correction: float = None,
+            H2O_gas_free_energy: float | None = None,
+            H2_gas_free_energy: float | None = None,
+            O2_gas_free_energy: float | None = None,
+            O_ad_correction: float | None = None,
+            OH_ad_correction: float | None = None,
+            OOH_ad_correction: float | None = None,
             ) -> None:
         if H2O_gas_free_energy is not None:
             self.species_energies['H2O_gas_free_energy'] = \
@@ -180,16 +203,16 @@ class OER_catalyst_study:
             self.species_energies['OOH_ad_correction'] = \
                 OOH_ad_correction
 
-    def get_gas_and_energy_corrections(self) -> dict[str, float]:
+    def get_gas_and_energy_corrections(self) -> dict[str, float | None]:
         return self.species_energies.copy()
 
-    def get_bulk_atoms(self) -> Atoms:
+    def get_bulk_atoms(self) -> Atoms | None:
         if self.bulk_atoms is None:
             return None
         else:
             return self.bulk_atoms.copy()
     
-    def get_bulk_structure(self) -> Structure:
+    def get_bulk_structure(self) -> Structure | None:
         if self.bulk_structure is None:
             return None
         else:
@@ -233,8 +256,8 @@ class OER_catalyst_study:
     def _build_surfaces(self, 
             miller_indices: tuple[int, int, int],
             stoichiometry_tolerance: float = 0.1,
-            max_diff_dict: dict = {},
-            ignore_stoichiometry_of_species: list[str] = [],
+            max_diff_dict: dict | None = None,
+            ignore_stoichiometry_of_species: list[str] | None = None,
             all_species_present: bool = True,
             symmetrize: bool = True,
             select_closest_O_stoichiometry: bool = True,
@@ -244,28 +267,34 @@ class OER_catalyst_study:
             max_atoms: int = 120,
             vacuum: float = 1,
             max_layers: int = 6,
-            timeout: int = 15*60,  # Default timeout of 15 minutes
+            timeout: int = 5*60,  # Default timeout of 5 minutes
             **kwargs
-            ) -> Atoms | None:
+            ) -> list[Slab]:
 
-        if self.failed_slab_generation:
-            raise RuntimeError("Previous slab generation attempt " \
-            "failed due to timeout. Slab generation will not be " \
-            "attempted again. It is not possible to generate " \
-            "surfaces for this bulk structure.")
+        # if self.failed_slab_generation:
+        #     raise RuntimeError("Previous slab generation attempt " \
+        #     "failed due to timeout. Slab generation will not be " \
+        #     "attempted again. It is not possible to generate " \
+        #     "surfaces for this bulk structure.")
+        
+        if max_layers < 3:
+            raise ValueError("max_layers must be at least 3 to allow"
+                " for reasonable slab generation attempts.")
+
+        if max_diff_dict is None:
+            max_diff_dict = {}
+        if ignore_stoichiometry_of_species is None:
+            ignore_stoichiometry_of_species = []
 
         # Log time, to be used for timeout handling:
         start_time = time.time()
 
         num_layers = 2
         while True:
-            if num_layers > max_layers:
+            time_elapsed = time.time() - start_time
+            if num_layers > max_layers or time_elapsed > timeout:
+                slabs = []
                 break
-            elif time.time() - start_time > timeout:
-                self.failed_slab_generation = True
-                raise TimeoutError("Slab generation timed out." \
-                    "It is not possible to generate surfaces for " \
-                    "this bulk structure.")
 
             sg = SlabGenerator(
             initial_structure = self.bulk_structure.copy(),
@@ -280,6 +309,7 @@ class OER_catalyst_study:
             slabs = sg.get_slabs(symmetrize = symmetrize)
             
             # Check if any slabs were generated, if not, retry:
+
             if len(slabs) == 0:
                 num_layers += 1
                 continue
@@ -307,11 +337,10 @@ class OER_catalyst_study:
                 num_layers += 1
                 continue
             
-            break # Surfaces was generated successfully, exit loop
-        
-    
+            break  # Surfaces were generated successfully; exit loop.
 
-        # <<<< --------------------------------------------------------- MORE CONSIDERATION SHOUD BE MADE WITH RECPECT TO FILTERING BASED ON MAX AOTMS AND MAX SLAB THICKNESS
+        # Removing slabs that contain too many atoms or are too thick.
+        # NOTE: could consider a more refined approach in the future.
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]
         slabs = [slab for slab in slabs if 
                     compute_slab_thickness(slab)
@@ -352,15 +381,15 @@ class OER_catalyst_study:
         if self.termination_ranking_df is None:
             self.termination_ranking_df = pd.DataFrame(columns=[
                 "Miller indices", "Termination index", 'Score', 
-                'Normalized score'])
+                'Normalized score', "Surface atoms:"])
         
     def predict_most_likely_surfaces(self, 
         max_miller: int = 1,
         method: Literal['all', 'disregard-coord-of-O',
                          'O-coordination'] = 'all',
         stoichiometry_tolerance: float = 0.2,
-        max_diff_dict: dict = {},
-        ignore_stoichiometry_of_species: list[str] = [],
+        max_diff_dict: dict | None = None,
+        ignore_stoichiometry_of_species: list[str] | None = None,
         all_species_present: bool = True,
         symmetrize: bool = True,
         select_closest_O_stoichiometry: bool = True,
@@ -370,13 +399,22 @@ class OER_catalyst_study:
         max_atoms: int = 120,
         vacuum: float = 1,
         max_layers: int = 6,
+        timeout: int = 5*60,
         ) -> None:
-        """
-        TEMP-DOC
-        """
 
-        ### <<<---------------------------------------------------------- NEED A TIME OUT!
+        if self.bulk_atoms is None or self.bulk_structure is None:
+            raise RuntimeError(
+                "Cannot rank terminations because the relaxed bulk "
+                "structure is not set. Set it with "
+                "`set_relaxed_structure(...)` or initialize the study "
+                "with `use_init_as_relaxed_bulk=True`."
+            )
 
+        if max_diff_dict is None:
+            max_diff_dict = {}
+        if ignore_stoichiometry_of_species is None:
+            ignore_stoichiometry_of_species = []
+        
         # Build method dict for later reference:
         new_ranking_method = {
             'method': method,
@@ -427,14 +465,16 @@ class OER_catalyst_study:
         for miller_indices in self.distinct_millers:
 
             slabs = self._build_surfaces(miller_indices, 
+                                         timeout = timeout,
                                          **new_ranking_method)
-            if slabs is None:
+            if len(slabs) == 0:
                 N_ts = len(termination_ranking_df)
                 termination_ranking_df.loc[N_ts] = {
                     "Miller indices": miller_indices,
                     "Termination index": N_ts,
                     "Score": float('nan'),
-                    "Normalized score": 0
+                    "Normalized score": 0,
+                    "Surface atoms:": []
                 }
             else:                
                 for slab in slabs:       
@@ -448,7 +488,7 @@ class OER_catalyst_study:
                     tol = 1e-5
                     if np.abs(np.dot(slab_normal, a_1)) > tol or \
                           np.abs(np.dot(slab_normal, a_2)) > tol:
-                        raise RuntimeError("Failed to vectors in plane " \
+                        raise RuntimeError("Failed to find vectors in plane " \
                                            "of the surface.")
                     A_surface = np.linalg.norm(np.cross(cell[0], 
                                                         cell[1]))
@@ -461,7 +501,7 @@ class OER_catalyst_study:
 
                     # Get the corresponding bulk coordination numbers
                     # for the atoms in the top half of the slab (i.e.,
-                    # what the cordination numbers would have been in 
+                    # what the coordination numbers would have been in
                     # the bulk):
                     corresponding_bulk_coords = np.array( \
                         slab.site_properties.get('bulk-custom-coord'))
@@ -476,15 +516,25 @@ class OER_catalyst_study:
                     corrd_diff = np.sum(coords_numbers - 
                                         corresponding_bulk_coords)
                     
-                    # Score, euqal to coordination difference per area:
+                    # Score, equal to coordination difference per area:
                     score = corrd_diff/A_surface
+
+                    # Determine top-layer adsorption-site elements:
+                    ad_sites_df, _ = determine_adsorption_sites(slab)
+                    surface_atoms = [
+                        element
+                        for element in
+                        ad_sites_df['ad site element'].tolist()
+                        if element != 'N/A'
+                    ]
 
                     N_ts = len(termination_ranking_df)
                     termination_ranking_df.loc[N_ts] = {
                         "Miller indices": miller_indices,
                         "Termination index": N_ts,
                         "Score": score,
-                        "Normalized score": 0
+                        "Normalized score": 0,
+                        "Surface atoms:": surface_atoms
                     }
                     self.terminations[N_ts] = slab
     
@@ -515,7 +565,7 @@ class OER_catalyst_study:
         self.termination_ranking_df = df
 
     def get_termination_rankings(self, normalize_scores = True
-                                     ) -> pd.DataFrame:
+                                     ) -> pd.DataFrame | None:
         out = None
         if self.termination_ranking_df is not None:
             if normalize_scores:
@@ -527,7 +577,15 @@ class OER_catalyst_study:
             termination_index: int,
             top_layer_tol: float = 1.5,
             only_reduced_coord_O_sites: bool = False
-            ) -> (pd.DataFrame, Atoms):
+            ) -> tuple[pd.DataFrame, Atoms]:
+        
+        if termination_index not in self.terminations:
+            raise ValueError(
+                "Invalid termination_index: "
+                f"{termination_index}. No generated termination exists "
+                "for this index."
+            )
+        
         return determine_adsorption_sites(
             self.terminations[termination_index],
             top_layer_tol=top_layer_tol,
@@ -560,7 +618,7 @@ class OER_catalyst_study:
     
     def initialize_oer_surface_study(self, 
             termination_index: int,
-            miller_indices: tuple[int, int, int] | None = None, 
+            # miller_indices: tuple[int, int, int] | None = None, 
             fixed_bottom_half: bool = True, 
             vacuum = 12,
             force = False) -> None:
@@ -571,15 +629,29 @@ class OER_catalyst_study:
                 "Use force=True to overwrite the existing study."
                 "!!! DOING THIS IS HIGHLY DISCOURAGED !!!")
 
-        # Doing sanity check if miller indices are provided:
-        if miller_indices is not None:
-            df = self.termination_ranking_df
-            millers_terminations_indecies = df[df['Miller indices'] ==
-                        miller_indices]['Termination index'].values
-            if termination_index not in millers_terminations_indecies:
-                raise ValueError("The provided termination_index does "\
-                "not correspond to the provided miller_indices.")
-            
+        if termination_index not in self.terminations:
+            raise ValueError(
+                "Invalid termination_index: "
+                f"{termination_index}. No generated termination exists "
+                "for this index."
+            )
+
+        # --- DEPRECATED CODE - WILL BE REMOVED IN THE FUTURE ----------
+
+        # # Do a sanity check if miller indices are provided:
+        # if miller_indices is not None:
+        #     # TODO: If `self.termination_ranking_df` is None here, raise
+        #     # a descriptive ValueError instructing the caller to run
+        #     # `predict_most_likely_surfaces(...)` first.
+        #     df = self.termination_ranking_df
+        #     millers_terminations_indecies = df[df['Miller indices'] ==
+        #                 miller_indices]['Termination index'].values
+        #     if termination_index not in millers_terminations_indecies:
+        #         raise ValueError("The provided termination_index does "\
+        #         "not correspond to the provided miller_indices.")
+
+        # --------------------------------------------------------------
+
         slab = self.terminations[termination_index]
         oer_surface_study = OER_surface_study(self, slab,
                 fixed_bottom_half = fixed_bottom_half, vacuum = vacuum)

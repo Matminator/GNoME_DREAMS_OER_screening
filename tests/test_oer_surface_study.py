@@ -16,6 +16,9 @@ from pymatgen.io.ase import AseAtomsAdaptor
 from gnome_dreams_oer_screening import (OER_catalyst_study, 
 OER_surface_study, OER_adsorption_site_study)
 from gnome_dreams_oer_screening import Explog
+from gnome_dreams_oer_screening.oer.oer_surface_study import (
+    SurfaceStudyLockedError,
+)
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
     StructureConsistencyError,
 )
@@ -165,9 +168,9 @@ def test_adsorbtion_update_O_adsorption_energies(
     surface_study.update_adsorption_energies()
     df = surface_study.get_adsorption_sites_df()
     for i, row in df.iterrows():
-        diff = row['G_approx(O)'] - 2.46
-        assert abs(diff) < 0.001, f"Expected G_approx(O) = 2.46, got " \
-            f"{row['G_approx(O)']} for site {i} of type {row['site type']}"
+        diff = row['G(O)'] - 2.46
+        assert abs(diff) < 0.001, f"Expected G(O) = 2.46, got " \
+            f"{row['G(O)']} for site {i} of type {row['site type']}"
 
 
 def test_set_relaxed_base_surface_raises_structure_consistency_error(
@@ -204,4 +207,149 @@ def test_set_relaxed_base_surface_raises_structure_consistency_error(
     ):
         surface_study.set_relaxed_base_surface(
             reordered_surface, energy=-278.13500000000005
+        )
+
+
+def test_set_relaxed_base_surface_can_retry_after_missing_energy_error(
+        TiO2_r_bulk):
+    atoms, _ = TiO2_r_bulk
+
+    study = OER_catalyst_study(
+        atoms.copy(),
+        H2_gas_free_energy=-6.77,
+        H2O_gas_free_energy=-14.217,
+        use_init_as_relaxed_bulk=True,
+    )
+    atoms_to_relax = study.get_init_atoms()
+    study.set_relaxed_structure(atoms_to_relax)
+    study.predict_most_likely_surfaces(method='O-coordination')
+
+    termination_index = next(iter(study.get_terminations_dict()))
+    study.initialize_oer_surface_study(termination_index)
+
+    surface_study = study.get_surface_studies()[termination_index]
+
+    relaxed_surface = surface_study.get_non_relaxed_surface()
+
+    # First attempt should raise error due to missing energy:
+    with pytest.raises(
+        ValueError,
+        match="Energy not provided and could not be obtained",
+    ):
+        surface_study.set_relaxed_base_surface(relaxed_surface)
+
+    success = surface_study.set_relaxed_base_surface(
+        relaxed_surface, energy=-278.13500000000005
+    )
+
+    # The second attempt should succeed, and the relaxed surface and 
+    # energy should be set correctly:
+    assert success is True
+    assert surface_study.relaxed_surface_energy == -278.13500000000005
+    assert surface_study.get_relaxed_surface() is not None
+
+
+def test_set_relaxed_base_surface_locks_study_for_disconnected_surface(
+        TiO2_r_bulk):
+    atoms, _ = TiO2_r_bulk
+
+    study = OER_catalyst_study(
+        atoms.copy(),
+        H2_gas_free_energy=-6.77,
+        H2O_gas_free_energy=-14.217,
+        use_init_as_relaxed_bulk=True,
+    )
+    atoms_to_relax = study.get_init_atoms()
+    study.set_relaxed_structure(atoms_to_relax)
+    study.predict_most_likely_surfaces(method='O-coordination')
+
+    termination_index = next(iter(study.get_terminations_dict()))
+    study.initialize_oer_surface_study(termination_index)
+    surface_study = study.get_surface_studies()[termination_index]
+
+    # Make a disconnected surface:
+    disconnected_surface = surface_study.get_non_relaxed_surface()
+    disconnected_surface.set_pbc(False)
+    disconnected_surface[-1].position += np.array([50.0, 50.0, 50.0])
+
+    success = surface_study.set_relaxed_base_surface(
+        disconnected_surface, energy=-278.13500000000005
+    )
+
+    # Success should be False, as the surface should not be set:
+    assert success is False
+    assert surface_study.study_locked is True
+    assert surface_study.relaxed_surface_energy is None
+    with pytest.raises(
+        ValueError,
+        match="No relaxed surface has been provided",
+    ):
+        surface_study.get_relaxed_surface()
+
+    # A later valid relaxed surface should unlock the study and be
+    # accepted:
+    valid_surface = surface_study.get_non_relaxed_surface()
+    retry_success = surface_study.set_relaxed_base_surface(
+        valid_surface,
+        energy=-278.13500000000005,
+    )
+
+    assert retry_success is True
+    assert surface_study.study_locked is False
+    assert surface_study.relaxed_surface_energy == -278.13500000000005
+    assert surface_study.get_relaxed_surface() == valid_surface
+
+
+def test_determine_adsorption_sites_raises_specific_error_for_locked_study(
+        TiO2_r_bulk):
+    atoms, _ = TiO2_r_bulk
+
+    study = OER_catalyst_study(
+        atoms.copy(),
+        H2_gas_free_energy=-6.77,
+        H2O_gas_free_energy=-14.217,
+        use_init_as_relaxed_bulk=True,
+    )
+    atoms_to_relax = study.get_init_atoms()
+    study.set_relaxed_structure(atoms_to_relax)
+    study.predict_most_likely_surfaces(method='O-coordination')
+
+    termination_index = next(iter(study.get_terminations_dict()))
+    study.initialize_oer_surface_study(termination_index)
+    surface_study = study.get_surface_studies()[termination_index]
+
+    disconnected_surface = surface_study.get_non_relaxed_surface()
+    disconnected_surface.set_pbc(False)
+    disconnected_surface[-1].position += np.array([50.0, 50.0, 50.0])
+
+    success = surface_study.set_relaxed_base_surface(
+        disconnected_surface, energy=-278.13500000000005
+    )
+
+    assert success is False
+
+    with pytest.raises(
+        SurfaceStudyLockedError,
+        match="surface study is locked due to a previously provided "
+        "non-continuous relaxed surface",
+    ):
+        surface_study.determine_adsorption_sites()
+
+    # Test that a valied surface may be provided after the error:
+    success = surface_study.set_relaxed_base_surface(
+        surface_study.get_non_relaxed_surface(), energy = 10
+    )
+    assert success is True
+    assert surface_study.study_locked is False
+
+
+    # Test that the method can be called successfully after providing a 
+    # valid relaxed surface
+    try:
+        surface_study.determine_adsorption_sites()
+    except SurfaceStudyLockedError:
+        pytest.fail(
+            "determine_adsorption_sites should not raise "
+            "SurfaceStudyLockedError after providing a valid relaxed " \
+            "surface"
         )

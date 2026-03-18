@@ -208,22 +208,7 @@ def test_TiO2_r_110_surface_score_calculation_all_coordination(
 
 # --- Testing timeout and assoriated flag in _build_surfaces: ----------
 @pytest.mark.mini
-def test_build_surfaces_raises_if_previous_timeout_failed():
-    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
-    study = OER_catalyst_study(
-        atoms,
-        H2_gas_free_energy=-2.0,
-        H2O_gas_free_energy=-4.0,
-        use_init_as_relaxed_bulk=True,
-    )
-    study.failed_slab_generation = True
-
-    with pytest.raises(RuntimeError, match="Previous slab generation attempt"):
-        study._build_surfaces((1, 0, 0), timeout=1)
-
-
-@pytest.mark.mini
-def test_build_surfaces_timeout_sets_failed_flag(monkeypatch):
+def test_build_surfaces_timeout_returns_empty_list(monkeypatch):
     atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
     study = OER_catalyst_study(
         atoms,
@@ -233,13 +218,9 @@ def test_build_surfaces_timeout_sets_failed_flag(monkeypatch):
     )
 
     time_values = iter([0.0, 2.0])
-    monkeypatch.setattr(oer_study_module.time, "time", lambda: next(time_values))
+    monkeypatch.setattr(oer_study_module.time, "time", 
+                        lambda: next(time_values))
 
-    with pytest.raises(
-        TimeoutError,
-        match="Slab generation timed out\\.It is not possible to generate surfaces for this bulk structure\\.",
-    ):
-        study._build_surfaces((1, 0, 0), timeout=1)
-
-    assert study.failed_slab_generation is True
+    slabs = study._build_surfaces((1, 0, 0), timeout=1)
+    assert slabs == []
 # --- End of testing timeout and assoriated flag in _build_surfaces ----

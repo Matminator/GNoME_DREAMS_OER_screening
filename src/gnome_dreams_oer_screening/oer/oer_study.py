@@ -106,7 +106,7 @@ class OER_catalyst_study:
         self.terminations = {}
         self.applied_ranking_method = None
         self.oer_surface_studies = {}
-        self.failed_slab_generation = False
+        # self.failed_slab_generation = False
         self.OH_OOH_scaling_intercept = OH_OOH_scaling_intercept
 
     def get_init_structure(self) -> Structure:
@@ -243,15 +243,15 @@ class OER_catalyst_study:
             max_atoms: int = 120,
             vacuum: float = 1,
             max_layers: int = 6,
-            timeout: int = 15*60,  # Default timeout of 15 minutes
+            timeout: int = 5*60,  # Default timeout of 5 minutes
             **kwargs
             ) -> list[Slab]:
 
-        if self.failed_slab_generation:
-            raise RuntimeError("Previous slab generation attempt " \
-            "failed due to timeout. Slab generation will not be " \
-            "attempted again. It is not possible to generate " \
-            "surfaces for this bulk structure.")
+        # if self.failed_slab_generation:
+        #     raise RuntimeError("Previous slab generation attempt " \
+        #     "failed due to timeout. Slab generation will not be " \
+        #     "attempted again. It is not possible to generate " \
+        #     "surfaces for this bulk structure.")
         
         if max_layers < 3:
             raise ValueError("max_layers must be at least 3 to allow"
@@ -267,13 +267,10 @@ class OER_catalyst_study:
 
         num_layers = 2
         while True:
-            if num_layers > max_layers:
+            time_elapsed = time.time() - start_time
+            if num_layers > max_layers or time_elapsed > timeout:
+                slabs = []
                 break
-            elif time.time() - start_time > timeout:
-                self.failed_slab_generation = True
-                raise TimeoutError("Slab generation timed out." \
-                    "It is not possible to generate surfaces for " \
-                    "this bulk structure.")
 
             sg = SlabGenerator(
             initial_structure = self.bulk_structure.copy(),
@@ -378,7 +375,7 @@ class OER_catalyst_study:
         max_atoms: int = 120,
         vacuum: float = 1,
         max_layers: int = 6,
-        timeout: int = 15*60,
+        timeout: int = 5*60,
         ) -> None:
 
         if self.bulk_atoms is None or self.bulk_structure is None:

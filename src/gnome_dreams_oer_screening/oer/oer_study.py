@@ -140,9 +140,7 @@ class OER_catalyst_study:
                 "instance if you want to use a different relaxed bulk" \
                 " structure")
         
-        # Make a copy, to avoide mutations outside of this class
-        relaxed_bulk = relaxed_bulk.copy() 
-        
+        # Type check:        
         if isinstance(relaxed_bulk, Atoms):
             relaxed_bulk_atoms = relaxed_bulk
             relaxed_bulk_structure = AseAtomsAdaptor.get_structure(
@@ -154,6 +152,10 @@ class OER_catalyst_study:
         else:
             raise ValueError("relaxed_bulk must be an ASE Atoms " \
                 "object or a Pymatgen Structure object.")
+        
+        # Make a copy, to avoide mutations outside of this class
+        relaxed_bulk = relaxed_bulk.copy() 
+        
 
         # Test provided relaxed_bulk structure matches the initial bulk:
         equal_results = are_systems_equal(relaxed_bulk_atoms, self.init_atoms)

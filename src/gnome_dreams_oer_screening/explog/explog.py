@@ -29,9 +29,6 @@ class Explog:
             "reason_or_hypothesis": pd.Series(dtype="string"),
             "notes": pd.Series(dtype="string"),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
-            "best_G(O)": pd.Series(dtype="float64"), 
-            "best_G(OH)": pd.Series(dtype="float64"),
-            "OOH_from_scaling": pd.Series(dtype="float64"), 
             "Overpotential_from_scaling": pd.Series(dtype="float64"),
             "idealOverPotential": pd.Series(dtype="float64")
         })

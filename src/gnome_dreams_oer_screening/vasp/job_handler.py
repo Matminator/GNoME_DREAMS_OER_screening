@@ -454,30 +454,46 @@ class Job_handler():
             .slurmID = str(slurm_id)
 
     def _update_ideal_over_pot(self, candidate_id) -> None:
-        # <<< ---------------------------------------------------------- NOT A PROPOR IMPLIMENTATION...
         cand_row = self.rframe.candidates[candidate_id]
-        study = cand_row.df['study_obj'].values[0]
+        study = cand_row.df["study_obj"].values[0]
         sur_studies = study.get_surface_studies()
 
-        over_pots = []
+        # Gather all currently available adsorption-site rows across
+        # surfaces.
+        frames = []
         for sur_study in sur_studies.values():
             sur_study.update_adsorption_energies()
             ad_sites_df = sur_study.get_adsorption_sites_df()
             if ad_sites_df is None:
                 continue
-            if 'ideal overpotential' not in ad_sites_df.columns:
+            if len(ad_sites_df) == 0:
                 continue
-            ad_sites_ideal_op = ad_sites_df['ideal overpotential'].values
-            ad_sites_ideal_op = np.array(ad_sites_ideal_op, dtype=np.float64)
-            ad_sites_ideal_op = ad_sites_ideal_op[~np.isnan(ad_sites_ideal_op)]
-            if ad_sites_ideal_op.size == 0:
-                continue  # skip empty site arrays
+            frames.append(ad_sites_df.copy())
 
-            over_pots.append(np.min(np.round(ad_sites_ideal_op, 2)))
+        ad_df = pd.concat(frames, ignore_index=True
+                          ) if len(frames) > 0 else None
+        cand_cols = set(self.rframe.candidates.df.columns.tolist())
 
-        if len(over_pots) != 0:
-            self.rframe.candidates[candidate_id].idealOverPotential \
-                = min(over_pots)
+        metric_to_candidate = {
+            "ideal overpotential": "idealOverPotential",
+            "overpotential from OH-OOH scaling relation":
+                "Overpotential_from_scaling",
+        }
+        for metric_col, cand_col in metric_to_candidate.items():
+            if cand_col not in cand_cols:
+                continue
+
+            value = np.nan
+            if ad_df is not None and metric_col in ad_df.columns:
+                metric_series = pd.to_numeric(
+                    ad_df[metric_col], errors="coerce"
+                )
+                min_value = metric_series.min(skipna=True)
+                if pd.notna(min_value):
+                    value = float(np.round(min_value, 2))
+
+            self.rframe.candidates.set_value(candidate_id, cand_col, 
+                                             value)
 
         
     def update_log(self) -> dict:

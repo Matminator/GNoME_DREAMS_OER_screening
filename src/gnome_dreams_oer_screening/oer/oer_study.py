@@ -37,21 +37,11 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-
-
 """
 TODO:
 should the terminations builder not fail hard, when some terminations
 may be accetable, but some fail to generate?
-
-TODO: 
-Need to add surface atoms to the terminations ranking (at least when 
-displayed or returnd for displayed...)
 """
-
-
-
-
 
 
 
@@ -71,7 +61,8 @@ class OER_catalyst_study:
     adsorption energies.
 
     Args:
-        init_atoms (Atoms): the unrelaxed bulk structure of the catalyst.
+        init_atoms (Atoms): the unrelaxed bulk structure of the 
+        catalyst.
         H2O_gas_free_energy (float): Free energy of H2O in gas phase.
         H2_gas_free_energy (float): Free energy of H2 in gas phase.
         O2_gas_free_energy (float, optional): Free energy of O2 in gas

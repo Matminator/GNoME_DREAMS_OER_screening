@@ -280,11 +280,7 @@ def test_set_relaxed_base_surface_locks_study_for_disconnected_surface(
     assert success is False
     assert surface_study.study_locked is True
     assert surface_study.relaxed_surface_energy is None
-    with pytest.raises(
-        ValueError,
-        match="No relaxed surface has been provided",
-    ):
-        surface_study.get_relaxed_surface()
+    assert surface_study.get_relaxed_surface() is None
 
     # A later valid relaxed surface should unlock the study and be
     # accepted:

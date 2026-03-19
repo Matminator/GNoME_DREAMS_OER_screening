@@ -1,4 +1,5 @@
 from datetime import datetime
+import subprocess
 from pysqa import QueueAdapter
 from pathlib import Path
 from typing import Literal
@@ -58,7 +59,7 @@ class Job_handler():
         termination_index: int | None = None,
         site_index: int | None = None,
         note: str | None = None
-        ) -> None:
+        ) -> str:
         """
         Register a new calculation process for a candidate.
 
@@ -131,7 +132,105 @@ class Job_handler():
             f"calculation of type {job_type} with status in " \
             f"{states}. This calculation is therefore invalid."
             raise RuntimeError(message)
-        # --------------------------------------------------------------    
+        # --------------------------------------------------------------
+
+        # --- Sanity checks against study object state -----------------
+        study_obj = cand_row.df["study_obj"].values[0]
+
+        if job_type == "bulk_relaxation":
+            # Test that termination and site indices are not provided:
+            if termination_index is not None or site_index is not None:
+                raise ValueError(
+                    "bulk_relaxation does not use termination_index "
+                    "or site_index."
+                )
+            # Test if the relaxed bulk already is set for the study:
+            if study_obj.get_bulk_atoms() is not None:
+                raise RuntimeError(
+                    f"Candidate {candidate_id} already has a relaxed "
+                    "bulk structure set. A new bulk_relaxation process "
+                    "must not be created."
+                )
+
+        elif job_type == "surface_relaxation":
+            # Test termination index is provided:
+            if termination_index is None:
+                raise ValueError(
+                    "surface_relaxation requires termination_index."
+                )
+            # Test site index is not provided:
+            if site_index is not None:
+                raise ValueError(
+                    "surface_relaxation does not use site_index."
+                )
+
+            # Test if surface study is initialized for the study:
+            surface_studies = study_obj.get_surface_studies()
+            if termination_index not in surface_studies:
+                raise ValueError(
+                    "No initialized surface study exists for "
+                    f"termination_index={termination_index}."
+                )
+
+            # Test if relaxed surface already is set for the study:
+            surface_study = surface_studies[termination_index]
+            if surface_study.base_surface_relaxed is not None:
+                raise RuntimeError(
+                    "A relaxed surface is already set for "
+                    f"termination_index={termination_index}. "
+                    "A new surface_relaxation process must not be "
+                    "created."
+                )
+
+        elif job_type in ["O_adsorption", "OH_adsorption"]:
+
+            # Test that termination index is provided:
+            if termination_index is None:
+                raise ValueError(
+                    f"{job_type} requires termination_index."
+                )
+            
+            # Test that site index is provided:
+            if site_index is None:
+                raise ValueError(
+                    f"{job_type} requires site_index."
+                )
+
+            # Test if surface study is initialized for the study:
+            surface_studies = study_obj.get_surface_studies()
+            if termination_index not in surface_studies:
+                raise ValueError(
+                    "No initialized surface study exists for "
+                    f"termination_index={termination_index}."
+                )
+            surface_study = surface_studies[termination_index]
+
+            # Test if ad-site study is initialized for the study:
+            adsite_studies = surface_study.\
+                get_adsorption_site_studies_dict()
+            if site_index not in adsite_studies:
+                raise ValueError(
+                    "No initialized adsorption-site study exists for "
+                    f"site_index={site_index} on "
+                    f"termination_index={termination_index}."
+                )
+            ad_study = adsite_studies[site_index]
+
+            if job_type == "O_adsorption" and \
+                    ad_study.relaxed_O_atoms is not None:
+                raise RuntimeError(
+                    "A relaxed O structure has already been accepted "
+                    f"for site_index={site_index} on "
+                    f"termination_index={termination_index}. "
+                    "A new O_adsorption process must not be created."
+                )
+            
+            # TODO: What should be done about the OH calculations???
+            # if job_type == "OH_adsorption" and \
+            #         ad_study.relaxed_OH_atoms is not None:
+
+
+        # --------------------------------------------------------------   
 
         # Format the new process row:
         new_process_row = {"job_type": job_type, 
@@ -141,7 +240,6 @@ class Job_handler():
                           "site_index": site_index,
                           "processNote": note
                           }
-
 
         # Get total number of processes, and assign as id:
         new_p_id = str(len(self.rframe.processes.df)) # new process id
@@ -166,8 +264,8 @@ class Job_handler():
         self,
         process_id: str,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto'],
-        vasp_cmd: list = ["mpiexec", "vasp_std"],
-        max_errors: int = 20
+        # vasp_cmd: list = ["mpiexec", "vasp_std"],
+        # max_errors: int = 20
         ) -> None:
         
         # Convert process_id to string if it is an integer:
@@ -204,6 +302,8 @@ class Job_handler():
         # Get the job type from the process row:    
         job_type = process_row['job_type'].values[0]
 
+        # --- Get the initial structure for the calculation ------------
+        # --- This inludes checks on the requsted calculation
         if job_type == 'bulk_relaxation': 
             # Test if relaxed structure already exists for the study:   
             if study.get_bulk_atoms() is not None:
@@ -246,19 +346,41 @@ class Job_handler():
                         f"already has a relaxed surface. Cannot submit"\
                             f"this surface relaxation job again.")
 
+                # Get init structure for surface relaxation:
                 init_atoms = surface_study.get_non_relaxed_surface()
                 init_structure \
                     = AseAtomsAdaptor.get_structure(init_atoms)
 
             elif job_type in ["O_adsorption", 'OH_adsorption']:
 
+                # Get site index for adsorption jobs:
                 site_index = process_row['site_index'].values[0]
+                if pd.isna(site_index):
+                    raise ValueError(
+                        f"{job_type} requires a valid site_index in "
+                        "the process row before submission."
+                    )
+                site_index = int(site_index)
 
                 adsite_studies = surface_study.\
                     get_adsorption_site_studies_dict()
+                if site_index not in adsite_studies:
+                    raise ValueError(
+                        "No initialized adsorption-site study exists "
+                        f"for site_index={site_index} on "
+                        f"termination_index={termination_index}."
+                    )
                 ad_study = adsite_studies[site_index]
                 
                 if job_type == "O_adsorption":
+                    # Defensive re-check in case process creation checks
+                    # were bypassed or state changed after creation.
+                    if ad_study.relaxed_O_atoms is not None:
+                        raise RuntimeError(
+                            "A relaxed O structure has already been "
+                            "accepted for this adsorption site. "
+                            "Cannot submit O_adsorption again."
+                        )
                     init_atoms = ad_study.get_atoms_for_O_calc()
                     init_structure \
                         = AseAtomsAdaptor.get_structure(init_atoms)
@@ -269,6 +391,7 @@ class Job_handler():
             self.calc_setup.surface_relaxation(
                 structure = init_structure, directory = calc_dir
             )
+        # --------------------------------------------------------------
 
         slurm_id = 42 + int(process_id) # Dummy initialization for test mode
         if self.mode != 'test':
@@ -286,7 +409,11 @@ class Job_handler():
                     f'run_vasp.py' + f" {calc_dir.resolve()}"
 
                 if partition == 'auto':
-                    partition = 'xeon40el8' # <<< ---------------------- CAN MAKE THIS MORE INTELLIGENT LATER
+                    # TODO, could make a smart auto-partition
+                    if len(init_structure) < 100:
+                        partition = 'xeon40el8'
+                    else:
+                        partition = 'xeon56'
                 
                 if partition == 'xeon56':
                     cores, nodes = 56, 1

@@ -15,23 +15,28 @@ from gnome_dreams_oer_screening import Explog
 
 from gnome_dreams_oer_screening.vasp.job_handler import Job_handler
 
-    
+
+def _new_oer_study(atoms: Atoms) -> OER_catalyst_study:
+    return OER_catalyst_study(
+        atoms.copy(),
+        H2_gas_free_energy=-2,
+        H2O_gas_free_energy=-4,
+    )
+
+
 @pytest.fixture(scope="module")
 def TiO2_r_bulk():
     dir_path = Path(__file__).parent
     TiO2_r_path = dir_path / '../notebooks/TiO2_rutile.cif'
     atoms = read(TiO2_r_path.resolve(), format='cif')
-    oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
     if atoms is None:
         pytest.fail("Slab generation failed")
-    return atoms, oer_study
+    return atoms
 
 def test_multiple_bulk_jobs_submitted(tmp_path, TiO2_r_bulk):
     NUM_PROCESSES = 10
 
-    atoms, study = TiO2_r_bulk
+    atoms = TiO2_r_bulk
     EXPLOG = Explog()
     EXPLOG.init(tmp_path, 'test')
 
@@ -44,7 +49,7 @@ def test_multiple_bulk_jobs_submitted(tmp_path, TiO2_r_bulk):
             candidate_id=cand_id,
             reason_or_hypothesis="Ir sites should be great", 
             notes="this is a great candidate", 
-            study_obj=study
+            study_obj=_new_oer_study(atoms)
         )
 
     p_ids = []
@@ -78,7 +83,8 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
     only_reduced_coord_O_sites = True # Use True as default for now
 
 
-    atoms, study = TiO2_r_bulk
+    atoms = TiO2_r_bulk
+    study = _new_oer_study(atoms)
     EXPLOG = Explog()
     EXPLOG.init(tmp_path, 'test')
 
@@ -167,7 +173,6 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
 
     EXPLOG.update_log()
     EXPLOG.relational_frame.processes.df
-    # EXPLOG.relational_frame.processes.df
 
 
     surface_study = study.get_surface_studies()[0]
@@ -179,15 +184,16 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
 
     site_indices = df['Site index'].to_list()
     assert len(site_indices) > 0
+    selected_site_index = int(site_indices[0])
     
-    surface_study.initialize_adsorption_site_study(site_indices[0])
+    surface_study.initialize_adsorption_site_study(selected_site_index)
         
 
     p_id = EXPLOG.add_process( 
         candidate_id = cant_id,
         calculation_type = "O_adsorption",
         termination_index = termination_index,
-        site_index = 0
+        site_index = selected_site_index
     )
 
     # EXPLOG.relational_frame.processes.df

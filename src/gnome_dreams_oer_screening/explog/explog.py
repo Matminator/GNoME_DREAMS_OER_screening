@@ -24,16 +24,16 @@ class Explog:
         # processes (both of which are needed for the Job_handler etc.)
         rf = RelationalFrame(root="candidates")
 
-        # study_df = pd.DataFrame(columns=["candidate_id",
-        #     "reason_or_hypothesis", "notes", "study_obj", "OHDone", 
-        #     "idealOverPotential"])
         study_df = pd.DataFrame({
             "candidate_id": pd.Series(dtype="string"),
             "reason_or_hypothesis": pd.Series(dtype="string"),
             "notes": pd.Series(dtype="string"),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
-            "OHDone": pd.Series(dtype="boolean"),   # True if OH adsorption is done
-            "idealOverPotential": pd.Series(dtype="float64") # nullable float (supports <NA>)
+            "best_G(O)": pd.Series(dtype="float64"), 
+            "best_G(OH)": pd.Series(dtype="float64"),
+            "OOH_from_scaling": pd.Series(dtype="float64"), 
+            "Overpotential_from_scaling": pd.Series(dtype="float64"),
+            "idealOverPotential": pd.Series(dtype="float64")
         })
         rf.add_table("candidates", study_df, pk="candidate_id")
 
@@ -126,26 +126,6 @@ class Explog:
         with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
             pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
         return result
-    
-    
-        #  SOULD RETURN A DICT, WITH ALL UPDATES... <<<-----------------------------------------
 
 EXPLOG = Explog()
     
-# --- Copilot suggested mehtods: ---------------------------------------
-
-    # def process_message(self, message):
-    #     # Process the message and update the relational frame
-    #     self.relational_frame.update(message)
-
-    # def run(self):
-    #     while True:
-    #         message = self.queue_adapter.get_message()
-    #         if message is not None:
-    #             self.process_message(message)
-                
-    # def submit_job(self, job):
-    #     self.submitter.submit(job)
-        
-    # def get_info(self, query):
-    #     return self.relational_frame.query(query)

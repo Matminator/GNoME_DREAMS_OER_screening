@@ -393,7 +393,9 @@ class Job_handler():
             )
         # --------------------------------------------------------------
 
-        slurm_id = 42 + int(process_id) # Dummy initialization for test mode
+        # Dummy initialization for test mode, should be overwriten when
+        # not in a-test-mode:
+        slurm_id = 42 + int(process_id) 
         if self.mode != 'test':
             
             if self.mode == 'slurm_test':

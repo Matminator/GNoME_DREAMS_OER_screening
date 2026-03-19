@@ -204,7 +204,14 @@ class Job_handler():
         # Get the job type from the process row:    
         job_type = process_row['job_type'].values[0]
 
-        if job_type == 'bulk_relaxation':
+        if job_type == 'bulk_relaxation': 
+            # Test if relaxed structure already exists for the study:   
+            if study.get_bulk_atoms() is not None:
+                raise RuntimeError(f"Candidate {candidate_id} already "\
+                        f"has set a relaxed structure. Cannot submit " \
+                        f"this bulk relaxation job again.")
+
+            # Get init structure for bulk relaxation:
             init_structure = study.get_init_structure()
             self.calc_setup.bulk_relaxation(
                 structure = init_structure, directory = calc_dir)
@@ -215,7 +222,6 @@ class Job_handler():
             # Need termination index for surface and adsorption jobs:
             termination_index = \
                 process_row['termination_index'].values[0]
-            site_index = process_row['site_index'].values[0]
 
             # Test if surface studies have been initialized:
             surface_studies = study.get_surface_studies()
@@ -233,11 +239,21 @@ class Job_handler():
             surface_study = surface_studies[termination_index]
 
             if job_type == "surface_relaxation":
+
+                # Test if relaxed surface already exists for the study:
+                if surface_study.get_relaxed_surface() is not None:
+                    raise RuntimeError(f"Candidate {candidate_id} " \
+                        f"already has a relaxed surface. Cannot submit"\
+                            f"this surface relaxation job again.")
+
                 init_atoms = surface_study.get_non_relaxed_surface()
                 init_structure \
                     = AseAtomsAdaptor.get_structure(init_atoms)
 
             elif job_type in ["O_adsorption", 'OH_adsorption']:
+
+                site_index = process_row['site_index'].values[0]
+
                 adsite_studies = surface_study.\
                     get_adsorption_site_studies_dict()
                 ad_study = adsite_studies[site_index]

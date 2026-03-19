@@ -156,7 +156,6 @@ class OER_catalyst_study:
         # Make a copy, to avoide mutations outside of this class
         relaxed_bulk = relaxed_bulk.copy() 
         
-
         # Test provided relaxed_bulk structure matches the initial bulk:
         equal_results = are_systems_equal(relaxed_bulk_atoms, self.init_atoms)
         if not equal_results[0]:

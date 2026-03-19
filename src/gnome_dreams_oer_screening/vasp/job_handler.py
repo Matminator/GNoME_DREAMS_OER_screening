@@ -20,8 +20,8 @@ class Job_handler():
     def __init__(self, 
         rframe: RelationalFrame,
         vasp_calculation_dir: Path,
-        mode: Literal["test", "slurm_test", "production_test", 
-                      "production"] = "production",
+        mode: Literal["test", "slurm_test", 'MLIP_test',
+                      "production_test", "production"],
         prefix_vasp_dirs_with_prefix: bool = True,
         sleep_min: int = 2
         ) -> None:
@@ -59,15 +59,41 @@ class Job_handler():
         site_index: int | None = None,
         note: str | None = None
         ) -> None:
+        """
+        Register a new calculation process for a candidate.
 
-        # Get total number of processes 
-        new_p_id = str(len(self.rframe.processes.df)) # new process id
+        A new process row is added to the relational-frame `processes`
+        table with status set to `'un-submitted'`, a generated
+        `process_id`, and a unique VASP working directory path.
 
-        # Test if new process id already exists (should not happen if 
-        # process ids are assigned correctly):
-        if new_p_id in self.rframe.processes.df['process_id'].values:
-            raise RuntimeError(f"Process id {new_p_id} already " \
-                "exists. Cannot enter new process with id {new_p_id}.")
+        The method rejects creating a new process when a non-failed
+        process already exists for the same candidate and the same
+        `(job_type, termination_index, site_index)` combination.
+
+        Args:
+            candidate_id:
+                Candidate identifier in the `candidates` table.
+            job_type:
+                Type of calculation to register.
+            termination_index:
+                Surface termination index for surface/adsorption jobs.
+            site_index:
+                Adsorption-site index for adsorption jobs.
+            note:
+                Optional process note stored in `processNote`.
+
+        Returns:
+            str: The newly assigned process id.
+
+        Raises:
+            RuntimeError:
+                If the generated process id already exists, or if a
+                non-failed matching process already exists for the
+                candidate.
+            KeyError:
+                If `candidate_id` does not exist in the candidates
+                table.
+        """
 
         # Get the candidates and processes rows from:
         cand_row = self.rframe.candidates[candidate_id]
@@ -115,9 +141,17 @@ class Job_handler():
                           "site_index": site_index,
                           "processNote": note
                           }
+
+
+        # Get total number of processes, and assign as id:
+        new_p_id = str(len(self.rframe.processes.df)) # new process id
+
+        # Test if new process id already exists (should not happen if 
+        # process ids are assigned correctly):
+        if new_p_id in self.rframe.processes.df['process_id'].values:
+            raise RuntimeError(f"Process id {new_p_id} already " \
+                f"exists. This should not be possible. Critical!!!")
         
-        p_df = cand_processes.df
-        p_N = len(p_df)
         new_process_row['process_id'] = new_p_id
         new_process_row['VASP_dir'] = str(self.vasp_dir / 
             f"{self.vasp_dir_prefix}{candidate_id}_" \

@@ -169,20 +169,27 @@ class Job_handler():
         vasp_cmd: list = ["mpiexec", "vasp_std"],
         max_errors: int = 20
         ) -> None:
-
+        
+        # Convert process_id to string if it is an integer:
         if isinstance(process_id, int):
             process_id = str(process_id)
+        # Test if process_id is now a string:
         if not isinstance(process_id, str):
             raise ValueError("process_id must be a string or an " \
                 "integer.")
 
-        # Get the process row for the candidate and process id:s
+        # Get the process row for the candidate and process id:
         process_row = self.rframe.processes.df.loc[
             (self.rframe.processes.df['process_id'] == process_id)
         ]
-
+        # Test if process row is empty:
         if process_row.empty:
-            raise ValueError(f"No process found for process_id {process_id}.")
+            raise ValueError(f"No process found for process_id \
+                             {process_id}.")
+        # Test if un-submitted (must be un-submitted to be submitted):
+        if process_row['status'].values[0] != 'un-submitted':
+            raise RuntimeError(f"Process {process_id}, is not an " \
+                f"un-submitted process and cannot be submitted.")
 
         # Get the candidate id from the process row:
         candidate_id = process_row['candidate_id'].values[0]
@@ -191,14 +198,6 @@ class Job_handler():
         study_obr = self.rframe.candidates[candidate_id].df["study_obj"]
         study = study_obr.values[0]        
 
-        # Test if process row exists and is un-submitted:
-        if len(process_row) == 0:
-            raise ValueError(f"No process found for candidate_id "
-                        f"{candidate_id} and process_id {process_id}.")
-        if process_row['status'].values[0] != 'un-submitted':
-            raise RuntimeError(f"Process {process_id}, is not an " \
-                f"un-submitted process and cannot be submitted.")
-        
         # Get the calculation directory from the process row:
         calc_dir = Path(process_row['VASP_dir'].values[0])
     

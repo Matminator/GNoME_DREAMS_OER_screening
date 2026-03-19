@@ -396,17 +396,27 @@ class Job_handler():
         # Dummy initialization for test mode, should be overwriten when
         # not in a-test-mode:
         slurm_id = 42 + int(process_id) 
+
         if self.mode != 'test':
-            
+            # Set up of submission command and parameters for slurm 
+            # submission. Needed when not in "test" mode:
             if self.mode == 'slurm_test':
-                python_sp = 'src/gnome_dreams_oer_screening/' \
+                # Setup dummy sleep job for slurm test mode: # NOTE NOTE NOTE -- need to reconsider this path
+                python_sp = 'src/gnome_dreams_oer_screening/' + \
                     f'niflheim/sleep_job.py {self.sleep_min}'
                 partition = 'xeon24el8_test'
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"
 
-            else:
+            elif self.mode == 'MLIP_test': # NOTE NOTE NOTE -- need to reconsider this path
+                python_sp = 'src/gnome_dreams_oer_screening/' \
+                    f'mlip_test_job.py {calc_dir.resolve()}'
+                partition = 'xeon24el8_test'
+                cores, nodes = 1, 1
+                walltime = f"00:10:00"
 
+            else:
+                # NOTE NOTE NOTE -- need to reconsider this path
                 python_sp = 'src/gnome_dreams_oer_screening/vasp/'+ \
                     f'run_vasp.py' + f" {calc_dir.resolve()}"
 

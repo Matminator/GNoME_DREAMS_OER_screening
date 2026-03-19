@@ -401,14 +401,14 @@ class Job_handler():
             # Set up of submission command and parameters for slurm 
             # submission. Needed when not in "test" mode:
             if self.mode == 'slurm_test':
-                # Setup dummy sleep job for slurm test mode: # NOTE NOTE NOTE -- need to reconsider this path
+                # Setup dummy sleep job for slurm test mode: # TODO NOTE NOTE NOTE -- need to reconsider this path
                 python_sp = 'src/gnome_dreams_oer_screening/' + \
                     f'niflheim/sleep_job.py {self.sleep_min}'
                 partition = 'xeon24el8_test'
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"
 
-            elif self.mode == 'MLIP_test': # NOTE NOTE NOTE -- need to reconsider this path
+            elif self.mode == 'MLIP_test': # TODO NOTE NOTE NOTE -- need to reconsider this path
                 python_sp = 'src/gnome_dreams_oer_screening/' \
                     f'mlip_test_job.py {calc_dir.resolve()}'
                 partition = 'xeon24el8_test'
@@ -416,7 +416,7 @@ class Job_handler():
                 walltime = f"00:10:00"
 
             else:
-                # NOTE NOTE NOTE -- need to reconsider this path
+                # TODO NOTE NOTE NOTE -- need to reconsider this path
                 python_sp = 'src/gnome_dreams_oer_screening/vasp/'+ \
                     f'run_vasp.py' + f" {calc_dir.resolve()}"
 
@@ -502,15 +502,22 @@ class Job_handler():
 
         # --- Identify calculations to update --------------------------
         if self.mode == 'test':
+            # For the test mode, all pending can be set to updating
+            # (no real job are run, and no real status exists)
             for idx, pdf_row in self.rframe.processes.df.iterrows():
                 if pdf_row['status'] == 'pending':
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'updating'
+                    
         else:
+            # if not in test mode, need to check the real status of the 
+            # jobs in the slurm queue, via get_my_jobs_status:
             slurm_queue = get_my_jobs_status()
             reduced_pdf = self.rframe.processes.df.copy()
             reduced_pdf = reduced_pdf[reduced_pdf['status'].isin(
                                                 ['running', 'pending'])]
+
+            # Update all statuses, based on current slurm queue
             for idx, row in reduced_pdf.iterrows():
                 slurm_id = row['slurmID']
                 if slurm_id in slurm_queue.keys():
@@ -521,13 +528,16 @@ class Job_handler():
                     if new_status == 'configuring':
                         new_status = 'pending'
 
+                    # set current status:
                     updates[row['process_id']] = new_status
                 else:
+                    # If job is not in the slurm queue, an update can
+                    # be made (either completed or failed considered 
+                    # later):
                     new_status = 'updating'
                 self.rframe.processes.df.at[idx, 'status'] = new_status
-                    
 
-        # --- Read results and mark as compleat or failed --------------
+        # --- Read results and mark as completed/failed ----------------
         if self.mode in ['test', 'slurm_test']:
             for idx, pdf_row in self.rframe.processes.df.iterrows():
                 if pdf_row['status'] == 'updating':
@@ -560,8 +570,9 @@ class Job_handler():
                             if job_type == 'O_adsorption':
                                 ad_study.set_relaxed_O_calc(atoms, E)
                             elif job_type == 'OH_adsorption':
-                                raise NotImplementedError(f"Result processing "
-                                    f"for job type {job_type} not implemented ")
+                                ad_study.set_relaxed_OH_calc(
+                                    atoms, energies=[E]
+                                )
                        
                             self._update_ideal_over_pot(candt_id)
 
@@ -575,14 +586,31 @@ class Job_handler():
             r_pdf = r_pdf[r_pdf['status'] == 'updating']
             for idx, pdf_row in r_pdf.iterrows():
                 vasp_dir = Path(pdf_row['VASP_dir'])
-                clean_up_vasp_directory(vasp_dir)
-                try:
-                    atoms = read_vasp_results(vasp_dir)[-1]
-                except Exception as e:
-                    self.rframe.processes.df.at[idx, 'status'] \
-                        = 'failed'
-                    updates[pdf_row['process_id']] = 'failed'
-                    continue
+
+                if self.mode == 'MLIP_test':
+                    try:
+
+                        traj = Trajectory('TEMP')
+                        atoms = traj[-1]
+                        clean_up_vasp_directory(vasp_dir)
+
+                        # TODO...
+
+                    except Exception:
+                        self.rframe.processes.df.at[idx, 'status'] \
+                            = 'failed'
+                        updates[pdf_row['process_id']] = 'failed'
+                        continue
+
+                else:
+                    try:
+                        atoms = read_vasp_results(vasp_dir)[-1]
+                        clean_up_vasp_directory(vasp_dir)
+                    except Exception:
+                        self.rframe.processes.df.at[idx, 'status'] \
+                            = 'failed'
+                        updates[pdf_row['process_id']] = 'failed'
+                        continue
                 
                 job_type = pdf_row['job_type']
                 termination_index = pdf_row['termination_index']
@@ -590,26 +618,62 @@ class Job_handler():
                 candt_id = pdf_row['candidate_id']
                 cand_row = self.rframe.candidates[candt_id]
                 study = cand_row.df['study_obj'].values[0]
+                unrecoverable_reason = None
 
                 if job_type == 'bulk_relaxation':
                     study.set_relaxed_structure(atoms)
                 else:
                     surface_studies = study.get_surface_studies()
-                    surface_so = surface_studies[termination_index]
+                    surface_study = surface_studies[termination_index]
                     
                     if job_type == 'surface_relaxation':                            
-                        surface_so.set_relaxed_base_surface(atoms)
+                        success = surface_study.\
+                            set_relaxed_base_surface(atoms)
+                        if not success:
+                            unrecoverable_reason = (
+                                "Relaxed surface dissociated and this" \
+                                " surface can therefore not be used " \
+                                "for adsorption studies."
+                            )
                     else:                                
-                        ad_site_dict = surface_so.\
+                        ad_site_dict = surface_study.\
                             get_adsorption_site_studies_dict()
                         ad_study = ad_site_dict[site_index]
                         if job_type == 'O_adsorption':
-                            ad_study.set_relaxed_O_calc(atoms)
+                            result = ad_study.set_relaxed_O_calc(atoms)
+                            if isinstance(result, tuple):
+                                success, message = result
+                            else:
+                                success, message = bool(result), None
+                            if not success:
+                                unrecoverable_reason = (
+                                    message
+                                    if message is not None
+                                    else "Relaxed O structure rejected "
+                                    "by study sanity checks."
+                                )
                         elif job_type == 'OH_adsorption':
-                            raise NotImplementedError(f"Result processing "
-                                f"for job type {job_type} not implemented ")
+                            result = ad_study.set_relaxed_OH_calc(atoms)
+                            if isinstance(result, tuple):
+                                success, message = result
+                            else:
+                                success, message = bool(result), None
+                            if not success:
+                                unrecoverable_reason = (
+                                    message
+                                    if message is not None
+                                    else "Relaxed OH structure rejected"
+                                    "by study sanity checks."
+                                )
                     
-                        self._update_ideal_over_pot(candt_id)
+                        if unrecoverable_reason is None:
+                            self._update_ideal_over_pot(candt_id)
+
+                if unrecoverable_reason is not None:
+                    self.rframe.processes.df.at[idx, 'status'] = \
+                        "unrecoverable: " + unrecoverable_reason
+                    updates[pdf_row['process_id']] = 'unrecoverable'
+                    continue
 
                 self.rframe.processes.df.at[idx, 'status'] = \
                     'completed'

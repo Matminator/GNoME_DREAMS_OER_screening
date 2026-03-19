@@ -125,12 +125,11 @@ class OER_surface_study:
     def get_non_relaxed_surface(self) -> Atoms:
         return self.base_surface_non_relaxed.copy()
 
-    def get_relaxed_surface(self) -> Atoms:
-        if self.base_surface_relaxed is None:
-            raise ValueError("No relaxed surface has been provided " \
-                             "yet. It needs to be set by calling " \
-                                "'set_relaxed_base_surface' method.")
-        return self.base_surface_relaxed.copy()
+    def get_relaxed_surface(self) -> Atoms | None:
+        out = None
+        if self.base_surface_relaxed is not None:
+            out = self.base_surface_relaxed.copy()
+        return out
 
     def set_relaxed_base_surface(self, surface: Atoms, 
                                  energy: float | None = None,

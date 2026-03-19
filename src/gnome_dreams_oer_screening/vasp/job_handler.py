@@ -212,6 +212,7 @@ class Job_handler():
         elif job_type in ["surface_relaxation", "O_adsorption", 
                           'OH_adsorption']:
 
+            # Need termination index for surface and adsorption jobs:
             termination_index = \
                 process_row['termination_index'].values[0]
             site_index = process_row['site_index'].values[0]
@@ -222,21 +223,22 @@ class Job_handler():
                 raise RuntimeError(f"Surface studies have not been " \
                     f"initialized for candidate  {candidate_id}. " \
                     f"Cannot submit surface relaxation job.")
-
+            
+            # Test if termination index is in surface studies:
             if termination_index not in surface_studies.keys():
                 raise ValueError(f"Termination index has not been " \
                     f"initialized for candidate {candidate_id}. " \
                     f"Cannot submit surface relaxation job.")
             
-            surface_so = surface_studies[termination_index]
+            surface_study = surface_studies[termination_index]
 
             if job_type == "surface_relaxation":
-                init_atoms = surface_so.get_non_relaxed_surface()
+                init_atoms = surface_study.get_non_relaxed_surface()
                 init_structure \
                     = AseAtomsAdaptor.get_structure(init_atoms)
 
             elif job_type in ["O_adsorption", 'OH_adsorption']:
-                adsite_studies = surface_so.\
+                adsite_studies = surface_study.\
                     get_adsorption_site_studies_dict()
                 ad_study = adsite_studies[site_index]
                 

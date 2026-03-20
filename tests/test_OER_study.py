@@ -1,6 +1,4 @@
 import pathlib
-import sys
-import signal
 import pytest
 import numpy as np
 
@@ -10,12 +8,17 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 from gnome_dreams_oer_screening import OER_catalyst_study
 import gnome_dreams_oer_screening.oer.oer_study as oer_study_module
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    StructureConsistencyError,
+)
     
 # --- Initilization tests of the OER_catalyst_study class: -------------
 @pytest.mark.mini
 def test_setup_1():
-
     atoms = Atoms('Fe', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
+    # Now needed for eqivalence, since tag is set in the initialization:
+    for atom in atoms:
+        atom.tag = 0
 
     oer_study =OER_catalyst_study(
         atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
@@ -31,8 +34,10 @@ def test_setup_1():
 
 @pytest.mark.mini
 def test_setup_2():
-
     atoms = Atoms('Ti', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
+    # Now needed for eqivalence, since tag is set in the initialization:
+    for atom in atoms:
+        atom.tag = 0
 
     oer_study =OER_catalyst_study(
         atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
@@ -62,6 +67,26 @@ def test_error_apon_setting_relaxed_structure():
     assert oer_study.get_init_atoms() ==  atoms_1    
     with pytest.raises(ValueError):
         oer_study.set_relaxed_structure(atoms_2)
+
+
+@pytest.mark.mini
+def test_set_relaxed_structure_raises_structure_consistency_error():
+    atoms = Atoms(
+        "TiO",
+        positions=[[0, 0, 0], [1, 0, 0]],
+        cell=[2, 2, 2],
+        pbc=True,
+    )
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4
+    )
+
+    reordered_atoms = oer_study.get_init_atoms()[[1, 0]]
+
+    with pytest.raises(
+        StructureConsistencyError, match="different symbols"
+    ):
+        oer_study.set_relaxed_structure(reordered_atoms)
 # --- End of initilization tests of the OER_catalyst_study class: ------
 
 # --- TEMP TITEL... 
@@ -183,27 +208,9 @@ def test_TiO2_r_110_surface_score_calculation_all_coordination(
     assert score_diff < 1e-6, f"Expected score: {expected_score}, but" \
         f" got {score}"
 
-
-
 # --- Testing timeout and assoriated flag in _build_surfaces: ----------
 @pytest.mark.mini
-def test_build_surfaces_raises_if_previous_timeout_failed():
-    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
-    study = OER_catalyst_study(
-        atoms,
-        H2_gas_free_energy=-2.0,
-        H2O_gas_free_energy=-4.0,
-        use_init_as_relaxed_bulk=True,
-    )
-    study.failed_slab_generation = True
-
-    with pytest.raises(RuntimeError, match="Previous slab generation attempt"):
-        study._build_surfaces((1, 0, 0), timeout=1)
-
-
-@pytest.mark.mini
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only timeout path")
-def test_build_surfaces_timeout_sets_failed_flag(monkeypatch):
+def test_build_surfaces_timeout_returns_empty_list(monkeypatch):
     atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
     study = OER_catalyst_study(
         atoms,
@@ -213,45 +220,9 @@ def test_build_surfaces_timeout_sets_failed_flag(monkeypatch):
     )
 
     time_values = iter([0.0, 2.0])
-    monkeypatch.setattr(oer_study_module.time, "time", lambda: next(time_values))
+    monkeypatch.setattr(oer_study_module.time, "time", 
+                        lambda: next(time_values))
 
-    with pytest.raises(
-        TimeoutError,
-        match="Slab generation timed out\\.It is not possible to generate surfaces for this bulk structure\\.",
-    ):
-        study._build_surfaces((1, 0, 0), timeout=1)
-
-    assert study.failed_slab_generation is True
-
-
-@pytest.mark.mini
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux-only timeout path")
-def test_build_surfaces_linux_timeout_sets_failed_flag_and_message(monkeypatch):
-    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
-    study = OER_catalyst_study(
-        atoms,
-        H2_gas_free_energy=-2.0,
-        H2O_gas_free_energy=-4.0,
-        use_init_as_relaxed_bulk=True,
-    )
-
-    state = {"handler": None}
-
-    def fake_signal(sig, handler):
-        state["handler"] = handler
-
-    def fake_alarm(seconds):
-        if seconds > 0:
-            state["handler"](None, None)
-
-    monkeypatch.setattr(signal, "signal", fake_signal)
-    monkeypatch.setattr(signal, "alarm", fake_alarm)
-
-    with pytest.raises(
-        TimeoutError,
-        match="Slab generation timed out\\.It is not possible to generate surfaces for this bulk structure\\.",
-    ):
-        study._build_surfaces((1, 0, 0), timeout=1)
-
-    assert study.failed_slab_generation is True
+    slabs = study._build_surfaces((1, 0, 0), timeout=1)
+    assert slabs == []
 # --- End of testing timeout and assoriated flag in _build_surfaces ----

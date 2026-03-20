@@ -15,7 +15,7 @@ class Explog:
     # we'll manually init later
     def init(self, 
         vasp_calculation_dir: Path | str = Path("vasp_calculations"),
-        mode: Literal["test", "slurm_test", "production_test", 
+        mode: Literal["test", "slurm_test", "MLIP_test", "production_test", 
                       "production"] = "production",
         prefix_vasp_dirs: bool = True,
         sleep_min = 2,
@@ -24,16 +24,13 @@ class Explog:
         # processes (both of which are needed for the Job_handler etc.)
         rf = RelationalFrame(root="candidates")
 
-        # study_df = pd.DataFrame(columns=["candidate_id",
-        #     "reason_or_hypothesis", "notes", "study_obj", "OHDone", 
-        #     "idealOverPotential"])
         study_df = pd.DataFrame({
             "candidate_id": pd.Series(dtype="string"),
             "reason_or_hypothesis": pd.Series(dtype="string"),
             "notes": pd.Series(dtype="string"),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
-            "OHDone": pd.Series(dtype="boolean"),   # True if OH adsorption is done
-            "idealOverPotential": pd.Series(dtype="float64") # nullable float (supports <NA>)
+            "Overpotential_from_scaling": pd.Series(dtype="float64"),
+            "idealOverPotential": pd.Series(dtype="float64")
         })
         rf.add_table("candidates", study_df, pk="candidate_id")
 
@@ -67,12 +64,11 @@ class Explog:
         rf.candidates.add_relation(name="processes", child_table="processes",
             fk_in_child="candidate_id")
         
-        self.relational_frame = rf
-        self.vasp_calculation_dir = vasp_calculation_dir
-        
         # Ensure vasp_calculation_dir is a Path object
         if isinstance(vasp_calculation_dir, str):
             vasp_calculation_dir = Path(vasp_calculation_dir)
+        self.relational_frame = rf
+        self.vasp_calculation_dir = vasp_calculation_dir
         self.job_handler = Job_handler(rf, vasp_calculation_dir,
             mode=mode, prefix_vasp_dirs_with_prefix=prefix_vasp_dirs,
             sleep_min=sleep_min)
@@ -102,7 +98,7 @@ class Explog:
         termination_index: int | None = None,
         site_index: int | None = None,
         note: str | None = None
-        ) -> None:
+        ) -> str | list[str]:
         
         result =  self.job_handler.enter_process(candidate_id, 
             calculation_type, termination_index, site_index, note)
@@ -126,26 +122,6 @@ class Explog:
         with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
             pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
         return result
-    
-    
-        #  SOULD RETURN A DICT, WITH ALL UPDATES... <<<-----------------------------------------
 
 EXPLOG = Explog()
     
-# --- Copilot suggested mehtods: ---------------------------------------
-
-    # def process_message(self, message):
-    #     # Process the message and update the relational frame
-    #     self.relational_frame.update(message)
-
-    # def run(self):
-    #     while True:
-    #         message = self.queue_adapter.get_message()
-    #         if message is not None:
-    #             self.process_message(message)
-                
-    # def submit_job(self, job):
-    #     self.submitter.submit(job)
-        
-    # def get_info(self, query):
-    #     return self.relational_frame.query(query)

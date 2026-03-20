@@ -139,7 +139,7 @@ def test_update_adsorption_energies_skips_incomplete_studies(prepared_surface_st
     surface_study.update_adsorption_energies()
     row = surface_study.get_adsorption_sites_df().loc[site_index]
 
-    assert pd.isna(row["G_approx(O)"])
+    assert pd.isna(row["G(O)"])
     assert pd.isna(row["ideal overpotential"])
 
 
@@ -172,9 +172,9 @@ def test_update_adsorption_energies_computes_o_only_overpotential(
     surface_study.update_adsorption_energies()
     row = surface_study.get_adsorption_sites_df().loc[on_top_site_index]
 
-    assert row["G_approx(O)"] == pytest.approx(target_g_o, abs=1e-8)
+    assert row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
     assert row["ideal overpotential"] == pytest.approx(0.0, abs=1e-8)
-    assert pd.isna(row["G_approx(OH)"])
+    assert pd.isna(row["G(OH)"])
 
 
 def test_end_to_end_test_mode_process_updates_candidate_overpotential(
@@ -380,9 +380,9 @@ def test_many_candidates_many_processes_compute_o_energies_and_overpotentials(
         surface_study = study.get_surface_studies()[0]
         df = surface_study.get_adsorption_sites_df()
 
-        assert "G_approx(O)" in df.columns
+        assert "G(O)" in df.columns
         assert "ideal overpotential" in df.columns
-        assert df["G_approx(O)"].notna().any()
+        assert df["G(O)"].notna().any()
         assert df["ideal overpotential"].notna().any()
 
 

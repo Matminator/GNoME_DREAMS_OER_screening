@@ -123,8 +123,7 @@ class OER_surface_study:
                 })
             ], ignore_index=True)
 
-        for energy_col in ['G_approx(O)', 'G(O)', 'G_approx(OH)', 
-                           'G(OH)', 'G_approx(OOH)', 'G(OOH)']:
+        for energy_col in ['G(O)', 'G(OH)', 'G(OOH)']:
             df[energy_col] = None
             
         return df        
@@ -236,15 +235,13 @@ class OER_surface_study:
                 energy_key = f"{species}_adsorbed_energy"
                 E = energies_dict.get(energy_key, None)
                 if E is not None:
-                    G_approx, G = self._compute_adsorption_free_energies(
+                    G, _ = self._compute_adsorption_free_energies(
                         species, energies_dict,
                         default_energies_and_corrections
                     )
                 else:
-                    G_approx = None
                     G = None
 
-                df.loc[index, f"G_approx({species})"] = G_approx
                 df.loc[index, f"G({species})"] = G
                     
             
@@ -258,15 +255,15 @@ class OER_surface_study:
         E_adsorbed = E_add - E_pure 
         corr = default_energies_and_corrections.get(
             f"{species}_ad_correction")
-        G_adsorbed_approx = E_adsorbed + corr
+        G_adsorbed = E_adsorbed + corr
 
         G_H = default_energies_and_corrections.get('H2_gas_free_energy') / 2
         G_H2O = default_energies_and_corrections.get('H2O_gas_free_energy')
 
         if species == 'O':
-            G_approx = G_adsorbed_approx + 2*G_H - G_H2O
+            G = G_adsorbed + 2*G_H - G_H2O
             
-        return G_approx, None  # Placeholder for now
+        return G, None  # Placeholder for now
 
             
     def get_adsorption_site_studies_dict(self, 

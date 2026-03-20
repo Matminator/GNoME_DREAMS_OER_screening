@@ -447,28 +447,50 @@ class Job_handler():
         # not in a-test-mode:
         slurm_id = 42 + int(process_id) 
 
+        if self.mode == "MLIP_test":
+            mlip_input_path = calc_dir / "mlip_input.traj"
+            mlip_input_atoms = AseAtomsAdaptor.get_atoms(init_structure)
+            input_traj = Trajectory(mlip_input_path, "w")
+            input_traj.write(mlip_input_atoms)
+            input_traj.close()
+
         if self.mode != 'test':
+            package_root = Path(__file__).resolve().parents[1]
+
             # Set up of submission command and parameters for slurm 
             # submission. Needed when not in "test" mode:
             if self.mode == 'slurm_test':
-                # Setup dummy sleep job for slurm test mode: # TODO NOTE NOTE NOTE -- need to reconsider this path
-                python_sp = 'src/gnome_dreams_oer_screening/' + \
-                    f'niflheim/sleep_job.py {self.sleep_min}'
+                sleep_script = package_root / "niflheim" / "sleep_job.py"
+                if not sleep_script.exists():
+                    raise FileNotFoundError(
+                        f"Sleep-job script not found: {sleep_script}"
+                    )
                 partition = 'xeon24el8_test'
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"
+                submit_command = (
+                    f'python3 "{sleep_script}" {self.sleep_min}'
+                )
 
             elif self.mode == 'MLIP_test': # TODO NOTE NOTE NOTE -- need to reconsider this path
-                python_sp = 'src/gnome_dreams_oer_screening/' \
-                    f'mlip_test_job.py {calc_dir.resolve()}'
+                mlip_script = package_root / "niflheim" / "mlip_job.py"
+                if not mlip_script.exists():
+                    raise FileNotFoundError(
+                        f"MLIP-job script not found: {mlip_script}"
+                    )
                 partition = 'xeon24el8_test'
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"
+                submit_command = (
+                    f'python3 "{mlip_script}" "{calc_dir.resolve()}"'
+                )
 
             else:
-                # TODO NOTE NOTE NOTE -- need to reconsider this path
-                python_sp = 'src/gnome_dreams_oer_screening/vasp/'+ \
-                    f'run_vasp.py' + f" {calc_dir.resolve()}"
+                run_vasp_script = package_root / "vasp" / "run_vasp.py"
+                if not run_vasp_script.exists():
+                    raise FileNotFoundError(
+                        f"run_vasp script not found: {run_vasp_script}"
+                    )
 
                 if partition == 'auto':
                     # TODO, could make a smart auto-partition
@@ -488,9 +510,12 @@ class Job_handler():
                                      f"recognized.")
 
                 walltime = "50:00:00"
+                submit_command = (
+                    f'python3 "{run_vasp_script}" "{calc_dir.resolve()}"'
+                )
 
             slurm_id = self.queueadapter.submit_job(
-                command = f"python3 {python_sp} {calc_dir.resolve()}",
+                command = submit_command,
                 slurm_out_name = calc_dir / "job_log",
                 partition = partition,
                 cores = cores,
@@ -639,12 +664,14 @@ class Job_handler():
 
                 if self.mode == 'MLIP_test':
                     try:
-
-                        traj = Trajectory('TEMP')
+                        traj = Trajectory(vasp_dir / "mlip_result.traj")
+                        if len(traj) == 0:
+                            raise RuntimeError(
+                                "MLIP result trajectory is empty."
+                            )
                         atoms = traj[-1]
+                        traj.close()
                         clean_up_vasp_directory(vasp_dir)
-
-                        # TODO...
 
                     except Exception:
                         self.rframe.processes.df.at[idx, 'status'] \

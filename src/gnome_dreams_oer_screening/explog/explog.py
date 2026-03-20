@@ -15,7 +15,7 @@ class Explog:
     # we'll manually init later
     def init(self, 
         vasp_calculation_dir: Path | str = Path("vasp_calculations"),
-        mode: Literal["test", "slurm_test", "production_test", 
+        mode: Literal["test", "slurm_test", "MLIP_test", "production_test", 
                       "production"] = "production",
         prefix_vasp_dirs: bool = True,
         sleep_min = 2,
@@ -64,12 +64,11 @@ class Explog:
         rf.candidates.add_relation(name="processes", child_table="processes",
             fk_in_child="candidate_id")
         
-        self.relational_frame = rf
-        self.vasp_calculation_dir = vasp_calculation_dir
-        
         # Ensure vasp_calculation_dir is a Path object
         if isinstance(vasp_calculation_dir, str):
             vasp_calculation_dir = Path(vasp_calculation_dir)
+        self.relational_frame = rf
+        self.vasp_calculation_dir = vasp_calculation_dir
         self.job_handler = Job_handler(rf, vasp_calculation_dir,
             mode=mode, prefix_vasp_dirs_with_prefix=prefix_vasp_dirs,
             sleep_min=sleep_min)

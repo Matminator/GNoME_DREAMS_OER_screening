@@ -472,7 +472,7 @@ class Job_handler():
                     f'python3 "{sleep_script}" {self.sleep_min}'
                 )
 
-            elif self.mode == 'MLIP_test': # TODO NOTE NOTE NOTE -- need to reconsider this path
+            elif self.mode == 'MLIP_test':
                 mlip_script = package_root / "niflheim" / "mlip_job.py"
                 if not mlip_script.exists():
                     raise FileNotFoundError(

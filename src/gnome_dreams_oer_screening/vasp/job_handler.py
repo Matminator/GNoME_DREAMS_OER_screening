@@ -59,7 +59,7 @@ class Job_handler():
         termination_index: int | None = None,
         site_index: int | None = None,
         note: str | None = None
-        ) -> str:
+        ) -> str | list[str]:
         """
         Register a new calculation process for a candidate.
 
@@ -84,7 +84,10 @@ class Job_handler():
                 Optional process note stored in `processNote`.
 
         Returns:
-            str: The newly assigned process id.
+            str | list[str]:
+                For non-OH jobs, the newly assigned process id.
+                For `OH_adsorption`, a list of process ids (one for each
+                OH initialization structure).
 
         Raises:
             RuntimeError:
@@ -230,35 +233,56 @@ class Job_handler():
             #         ad_study.relaxed_OH_atoms is not None:
 
 
-        # --------------------------------------------------------------   
+        # --------------------------------------------------------------
 
-        # Format the new process row:
-        new_process_row = {"job_type": job_type, 
-                          "candidate_id": candidate_id,
-                          "status": "un-submitted",
-                          "termination_index": termination_index,
-                          "site_index": site_index,
-                          "processNote": note
-                          }
+        def _add_single_process(single_note: str | None = None) -> str:
+            # Format the new process row:
+            new_process_row = {
+                "job_type": job_type,
+                "candidate_id": candidate_id,
+                "status": "un-submitted",
+                "termination_index": termination_index,
+                "site_index": site_index,
+                "processNote": single_note,
+            }
 
-        # Get total number of processes, and assign as id:
-        new_p_id = str(len(self.rframe.processes.df)) # new process id
+            # Get total number of processes, and assign as id:
+            new_p_id = str(len(self.rframe.processes.df))  # new process id
 
-        # Test if new process id already exists (should not happen if 
-        # process ids are assigned correctly):
-        if new_p_id in self.rframe.processes.df['process_id'].values:
-            raise RuntimeError(f"Process id {new_p_id} already " \
-                f"exists. This should not be possible. Critical!!!")
-        
-        new_process_row['process_id'] = new_p_id
-        new_process_row['VASP_dir'] = str(self.vasp_dir / 
-            f"{self.vasp_dir_prefix}{candidate_id}_" \
-            f"{job_type}_{new_process_row['process_id']}")
-                
-        self.rframe.processes.add_row(new_process_row, 
-                                      allow_update=True)
-        
-        return new_p_id
+            # Test if new process id already exists (should not happen if
+            # process ids are assigned correctly):
+            if new_p_id in self.rframe.processes.df["process_id"].values:
+                raise RuntimeError(
+                    f"Process id {new_p_id} already exists. "
+                    "This should not be possible. Critical!!!"
+                )
+
+            new_process_row["process_id"] = new_p_id
+            new_process_row["VASP_dir"] = str(
+                self.vasp_dir
+                / f"{self.vasp_dir_prefix}{candidate_id}_"
+                f"{job_type}_{new_process_row['process_id']}"
+            )
+
+            self.rframe.processes.add_row(new_process_row,
+                                          allow_update=True)
+            return new_p_id
+
+        # For OH adsorption, create one process per OH initialization.
+        if job_type == "OH_adsorption":
+            oh_inits = ad_study.get_OH_adsorbed_atoms()
+            process_ids = []
+            for oh_init_index in range(len(oh_inits)):
+                if note is None:
+                    process_note = f"OH_init_index={oh_init_index}"
+                else:
+                    process_note = (
+                        f"{note} | OH_init_index={oh_init_index}"
+                    )
+                process_ids.append(_add_single_process(process_note))
+            return process_ids
+
+        return _add_single_process(note)
     
     def submit_vasp_calculation(
         self,
@@ -385,8 +409,34 @@ class Job_handler():
                     init_structure \
                         = AseAtomsAdaptor.get_structure(init_atoms)
                 elif job_type == 'OH_adsorption':
-                    raise NotImplementedError(f"Submission for job type"
-                        f" {job_type} not implemented yet.")
+                    oh_candidates = ad_study.get_OH_adsorbed_atoms()
+                    if len(oh_candidates) == 0:
+                        raise RuntimeError(
+                            "No OH initialization structures are "
+                            "available for submission."
+                        )
+                    process_note = process_row["processNote"].values[0]
+                    oh_init_index = None
+                    if isinstance(process_note, str):
+                        token = "OH_init_index="
+                        if token in process_note:
+                            tail = process_note.split(token, 1)[1]
+                            tail = tail.split("|", 1)[0].strip()
+                            oh_init_index = int(tail)
+                    if oh_init_index is None:
+                        raise ValueError(
+                            "OH_adsorption process row is missing "
+                            "OH_init_index in processNote."
+                        )
+                    if oh_init_index < 0 or oh_init_index >= len(oh_candidates):
+                        raise ValueError(
+                            f"OH_init_index={oh_init_index} is out of "
+                            "range for available OH initializations "
+                            f"(n={len(oh_candidates)})."
+                        )
+                    init_atoms = oh_candidates[oh_init_index]
+                    init_structure \
+                        = AseAtomsAdaptor.get_structure(init_atoms)
 
             self.calc_setup.surface_relaxation(
                 structure = init_structure, directory = calc_dir

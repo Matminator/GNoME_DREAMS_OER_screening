@@ -99,7 +99,7 @@ class Explog:
         termination_index: int | None = None,
         site_index: int | None = None,
         note: str | None = None
-        ) -> None:
+        ) -> str | list[str]:
         
         result =  self.job_handler.enter_process(candidate_id, 
             calculation_type, termination_index, site_index, note)

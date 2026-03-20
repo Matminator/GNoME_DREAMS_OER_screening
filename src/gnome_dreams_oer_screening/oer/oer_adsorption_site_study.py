@@ -383,11 +383,12 @@ class OER_adsorption_site_study:
                 "setting relaxed OH structures for an \"on-top\" site."
             )
 
-        # Ensure correct format of atoms_list:
+        # Ensure correct format of atoms_list.
+        # Keep original Atoms references until after energy extraction.
         if isinstance(atoms_list, Atoms):
-            atoms_list = [atoms_list.copy()]
+            atoms_list = [atoms_list]
         else:
-            atoms_list = [atoms.copy() for atoms in atoms_list]
+            atoms_list = list(atoms_list)
 
         # --- Basic checks on the provided structures and energies: ----
         if len(atoms_list) == 0:
@@ -407,7 +408,7 @@ class OER_adsorption_site_study:
                     "as atoms_list."
                 )
             structure_energy_pairs = [
-                (atoms, float(E))
+                (atoms.copy(), float(E))
                 for atoms, E in zip(atoms_list, energies)
             ]
         else:
@@ -420,7 +421,7 @@ class OER_adsorption_site_study:
                         "Energy not provided and could not be "
                         "obtained from the relaxed atoms object."
                     )
-                structure_energy_pairs.append((atoms, E))
+                structure_energy_pairs.append((atoms.copy(), E))
 
         # --- run baseline sanity checks on atoms, in atoms_list: ------
         for atoms, _ in structure_energy_pairs:
@@ -448,7 +449,7 @@ class OER_adsorption_site_study:
             if not self.is_OH_adsorbate_intact(atoms):
                 rejected_counts["dissociated"] += 1
                 continue
-            accepted_pairs.append((atoms.copy(), E))
+            accepted_pairs.append((atoms, E))
 
         if len(accepted_pairs) == 0:
             reason_parts = []

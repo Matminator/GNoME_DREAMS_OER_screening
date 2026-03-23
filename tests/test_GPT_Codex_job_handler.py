@@ -32,6 +32,21 @@ class DummyStudy:
         return self._surfaces
 
 
+class UndeterminedSurfaceStudy:
+    def __init__(self):
+        self.update_calls = 0
+
+    def update_adsorption_energies(self):
+        self.update_calls += 1
+        raise AssertionError(
+            "update_adsorption_energies should not be called when "
+            "adsorption sites have not been determined."
+        )
+
+    def get_adsorption_sites_df(self):
+        return None
+
+
 @pytest.fixture()
 def local_explog_dir() -> Path:
     base = Path(".pytest_tmp_job_handler")
@@ -124,7 +139,7 @@ def test_update_candidate_oer_metrics_resets_fields_to_nan_without_valid_data(
     assert pd.isna(row.df["G(O) deviation"].iloc[0])
     assert pd.isna(row.idealOverPotential)
     assert pd.isna(row.Overpotential_from_scaling)
-    assert surface_none.update_calls == 1
+    assert surface_none.update_calls == 0
     assert surface_no_metrics.update_calls == 1
 
 
@@ -198,6 +213,114 @@ def test_update_candidate_oer_metrics_aggregates_o_deviation_independently(
     assert row.df["G(O) deviation"].iloc[0] == pytest.approx(0.03, abs=1e-12)
     assert row.idealOverPotential == pytest.approx(0.31, abs=1e-12)
     assert row.Overpotential_from_scaling == pytest.approx(0.28, abs=1e-12)
+
+
+def test_update_candidate_oer_metrics_skips_surfaces_without_determined_adsorption_sites(
+    local_explog_dir: Path,
+):
+    skipped_surface = UndeterminedSurfaceStudy()
+    valid_surface = DummySurfaceStudy(
+        pd.DataFrame(
+            {
+                "G(O) deviation": [0.11, 0.04],
+                "ideal overpotential": [np.nan, 0.29],
+                "overpotential from OH-OOH scaling relation": [0.41, 0.33],
+            }
+        )
+    )
+    dummy_study = DummyStudy({0: skipped_surface, 1: valid_surface})
+
+    explog = Explog()
+    explog.init(local_explog_dir, mode="test")
+    candidate_id = "cand_skip_undetermined_surface"
+    explog.add_candidate(candidate_id=candidate_id, study_obj=dummy_study)
+
+    explog.job_handler._update_candidate_oer_metrics(candidate_id)
+
+    row = explog.relational_frame.candidates[candidate_id]
+    assert row.df["G(O) deviation"].iloc[0] == pytest.approx(0.04, abs=1e-12)
+    assert row.idealOverPotential == pytest.approx(0.29, abs=1e-12)
+    assert row.Overpotential_from_scaling == pytest.approx(0.33, abs=1e-12)
+    assert skipped_surface.update_calls == 0
+    assert valid_surface.update_calls == 1
+
+
+def test_update_log_does_not_leave_rows_updating_when_other_surface_lacks_adsorption_sites(
+    local_explog_dir: Path,
+):
+    cif_path = (
+        Path(__file__).resolve().parent / "../notebooks/TiO2_rutile.cif"
+    ).resolve()
+    atoms = read(cif_path, format="cif")
+
+    explog = Explog()
+    explog.init(local_explog_dir, mode="test")
+
+    candidate_id = "cand_multi_surface_guard"
+    study = OER_catalyst_study(
+        atoms.copy(),
+        H2O_gas_free_energy=-14.217,
+        H2_gas_free_energy=-6.77,
+        use_init_as_relaxed_bulk=True,
+    )
+    study.predict_most_likely_surfaces(max_miller=1)
+    termination_indices = list(study.get_terminations_dict().keys())
+    if len(termination_indices) < 2:
+        pytest.skip("Need at least two terminations for this regression test.")
+
+    valid_term = int(termination_indices[0])
+    undetermined_term = int(termination_indices[1])
+
+    for offset, term_idx in enumerate((valid_term, undetermined_term)):
+        study.initialize_oer_surface_study(term_idx)
+        surface_study = study.get_surface_studies()[term_idx]
+        set_ok = surface_study.set_relaxed_base_surface(
+            surface_study.get_non_relaxed_surface(),
+            energy=-278.135 - offset,
+        )
+        assert set_ok is True
+
+    valid_surface = study.get_surface_studies()[valid_term]
+    valid_surface.determine_adsorption_sites(
+        only_reduced_coord_O_sites=True
+    )
+    site_index = int(
+        valid_surface.get_adsorption_sites_df()["Site index"].iloc[0]
+    )
+    valid_surface.initialize_adsorption_site_study(site_index)
+
+    explog.add_candidate(candidate_id=candidate_id, study_obj=study)
+    o_process_id = explog.add_process(
+        candidate_id=candidate_id,
+        calculation_type="O_adsorption",
+        termination_index=valid_term,
+        site_index=site_index,
+    )
+    explog.submit_process(o_process_id)
+
+    trailing_candidate_id = "cand_trailing_bulk"
+    trailing_study = OER_catalyst_study(
+        atoms.copy(),
+        H2O_gas_free_energy=-14.217,
+        H2_gas_free_energy=-6.77,
+    )
+    explog.add_candidate(
+        candidate_id=trailing_candidate_id,
+        study_obj=trailing_study,
+    )
+    bulk_process_id = explog.add_process(
+        candidate_id=trailing_candidate_id,
+        calculation_type="bulk_relaxation",
+    )
+    explog.submit_process(bulk_process_id)
+
+    updates = explog.update_log()
+
+    assert updates[o_process_id] == "completed"
+    assert updates[bulk_process_id] == "completed"
+
+    pdf = explog.relational_frame.processes.df.copy()
+    assert set(pdf["status"].tolist()) == {"completed"}
 
 
 def test_refresh_oh_batch_finalization_state_waits_for_all_terminal_statuses(

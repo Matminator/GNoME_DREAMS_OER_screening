@@ -25,38 +25,27 @@ class Explog:
         rf = RelationalFrame(root="candidates")
 
         study_df = pd.DataFrame({
-            "candidate_id": pd.Series(dtype="string"),
-            "reason_or_hypothesis": pd.Series(dtype="string"),
-            "notes": pd.Series(dtype="string"),
+            "candidate_id": pd.Series(dtype=pd.StringDtype()),
+            "reason_or_hypothesis": pd.Series(dtype=pd.StringDtype()),
+            "notes": pd.Series(dtype=pd.StringDtype()),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
-            "Overpotential_from_scaling": pd.Series(dtype="float64"),
-            "idealOverPotential": pd.Series(dtype="float64")
+            "G(O) Deviation from optimal": pd.Series(dtype=pd.BooleanDtype()),
+            "Overpotential_from_scaling": pd.Series(dtype=pd.Float64Dtype()),
+            "idealOverPotential": pd.Series(dtype=pd.Float64Dtype()) # nullable float (supports <NA>)
+
         })
         rf.add_table("candidates", study_df, pk="candidate_id")
 
-        # process_df = pd.DataFrame(columns=["process_id", "candidate_id", 
-        #     "job_type", "slurmID", "status", 'termination_index', 
-        #     'site_index', "VASP_dir", "processNote"]).astype({
-        #         "process_id": "string",
-        #         "candidate_id": "string",
-        #         "job_type": "string",
-        #         "slurmID": "string",
-        #         "status": "string",
-        #         'termination_index': 'Int64', # nullable integer (supports <NA>)
-        #         'site_index': 'Int64',       # nullable integer (supports <NA>)
-        #         "VASP_dir": "string",
-        #         "processNote": "string"
-        #     })
         process_df = pd.DataFrame({
-            "process_id": pd.Series(dtype="string"),
-            "candidate_id": pd.Series(dtype="string"),
-            "job_type": pd.Series(dtype="string"),
-            "slurmID": pd.Series(dtype="string"),
-            "status": pd.Series(dtype="string"),
-            'termination_index': pd.Series(dtype='Int64'), # nullable integer (supports <NA>)
-            'site_index': pd.Series(dtype='Int64'),       # nullable integer (supports <NA>)
-            "VASP_dir": pd.Series(dtype="string"),
-            "processNote": pd.Series(dtype="string")
+            "process_id": pd.Series(dtype=pd.StringDtype()),
+            "candidate_id": pd.Series(dtype=pd.StringDtype()),
+            "job_type": pd.Series(dtype=pd.StringDtype()),
+            "slurmID": pd.Series(dtype=pd.StringDtype()),
+            "status": pd.Series(dtype=pd.StringDtype()),
+            'termination_index': pd.Series(dtype=pd.Int64Dtype()), # nullable integer (supports <NA>)
+            'site_index': pd.Series(dtype=pd.Int64Dtype()),       # nullable integer (supports <NA>)
+            "VASP_dir": pd.Series(dtype=pd.StringDtype()),
+            "processNote": pd.Series(dtype=pd.StringDtype())
         })
         rf.add_table("processes", process_df, pk="process_id")
 

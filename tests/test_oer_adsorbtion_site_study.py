@@ -129,3 +129,49 @@ def test_get_OH_adsorbed_atoms_lattice_O_uses_tag_3():
         assert abs(d_target - 0.98) < 0.10
         assert d_other > 0.25
         assert np.dot(H_pos - target_O_pos, normal) > 0.0
+
+
+def test_is_adsorbate_near_site_accepts_rigid_translation_with_default_limit():
+    study = _build_simple_on_top_study()
+    O_atoms = study.get_atoms_for_O_calc()
+
+    translated_atoms = O_atoms.copy()
+    translated_atoms[0].position += np.array([0.9, 0.0, 0.0])
+    translated_atoms[1].position += np.array([0.9, 0.0, 0.0])
+
+    assert study.is_adsorbate_near_site(translated_atoms)
+
+
+def test_is_adsorbate_near_site_rejects_adsorbate_motion_away_from_site_atom():
+    study = _build_simple_on_top_study()
+    O_atoms = study.get_atoms_for_O_calc()
+
+    drifted_atoms = O_atoms.copy()
+    drifted_atoms[1].position += np.array([2.0, 0.0, 0.0])
+
+    assert not study.is_adsorbate_near_site(drifted_atoms)
+
+
+def test_is_adsorbate_near_site_accepts_explicit_distance_threshold():
+    study = _build_simple_on_top_study()
+    O_atoms = study.get_atoms_for_O_calc()
+
+    assert study.is_adsorbate_near_site(
+        O_atoms,
+        max_adsorbate_site_distance=1.9,
+    )
+    assert not study.is_adsorbate_near_site(
+        O_atoms,
+        max_adsorbate_site_distance=1.7,
+    )
+
+
+def test_is_adsorbate_near_site_is_not_applied_for_lattice_o_sites():
+    study = _build_simple_lattice_O_study()
+    OH_atoms = study.get_OH_adsorbed_atoms()[0]
+
+    drifted_atoms = OH_atoms.copy()
+    drifted_atoms[1].position += np.array([1.5, 0.0, 0.0])
+    drifted_atoms[2].position += np.array([1.5, 0.0, 0.0])
+
+    assert study.is_adsorbate_near_site(drifted_atoms)

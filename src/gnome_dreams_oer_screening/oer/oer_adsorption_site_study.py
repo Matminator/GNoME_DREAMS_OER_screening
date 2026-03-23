@@ -1,5 +1,6 @@
 import numpy as np
 from ase import Atoms
+from ase.data import covalent_radii
 from ase.geometry import find_mic
 
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
@@ -10,6 +11,8 @@ from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
 
     
 class OER_adsorption_site_study:
+    MAX_SITE_BOND_DISTANCE_FACTOR = 1.2
+
     """
     Class for managing placement of OER intermediates on a given 
     adsorption site of a clean surface, and storage of the energies.
@@ -105,31 +108,75 @@ class OER_adsorption_site_study:
 
         return int(O_indices[0])
 
+    @staticmethod
+    def _get_site_atom_index(atoms: Atoms) -> int:
+        site_indices = [
+            i
+            for i, atom in enumerate(atoms)
+            if atom.tag == 3
+        ]
+        if len(site_indices) != 1:
+            raise ValueError(
+                "Could not identify a unique adsorption-site atom "
+                "with tag=3."
+            )
+        return int(site_indices[0])
+
+    def _get_default_max_adsorbate_site_distance(
+        self,
+        atoms: Atoms,
+    ) -> float:
+        O_index = self._get_adsorbed_O_index(atoms)
+        site_index = self._get_site_atom_index(atoms)
+
+        O_radius = float(covalent_radii[atoms[O_index].number])
+        site_radius = float(covalent_radii[atoms[site_index].number])
+        if O_radius <= 0 or site_radius <= 0:
+            raise ValueError(
+                "Covalent radii must be positive to determine the "
+                "default adsorbate-site distance threshold."
+            )
+
+        return self.MAX_SITE_BOND_DISTANCE_FACTOR * (
+            O_radius + site_radius
+        )
+
     def is_adsorbate_near_site(
         self,
         atoms: Atoms,
-        max_site_drift: float = 1.5,
+        max_adsorbate_site_distance: float | None = None,
     ) -> bool:
         """
-        Test if the adsorbed O atom has drifted too far from the initial
-        adsorption position for the site study.
+        Test if the adsorbed O atom remains within a plausible bond
+        distance of the tagged adsorption-site atom.
+
+        If `max_adsorbate_site_distance` is not provided, the limit is
+        set to `1.2 * (r_cov(site atom) + r_cov(adsorbed O))`.
+        For `lattice O` sites, no separate adsorbed O exists in the
+        O-stage geometry, so this drift criterion is treated as
+        not applicable and always passes.
         """
 
-        if max_site_drift <= 0:
-            raise ValueError("max_site_drift must be positive.")
+        if self.site_type != "on-top":
+            return True
+
+        if max_adsorbate_site_distance is None:
+            max_adsorbate_site_distance = \
+                self._get_default_max_adsorbate_site_distance(atoms)
+        elif max_adsorbate_site_distance <= 0:
+            raise ValueError(
+                "max_adsorbate_site_distance must be positive."
+            )
 
         O_index = self._get_adsorbed_O_index(atoms)
-        displacement = atoms[O_index].position - np.asarray(
-            self.init_add_position, dtype=float 
-        )
-
+        site_index = self._get_site_atom_index(atoms)
+        displacement = \
+            atoms[O_index].position - atoms[site_index].position
         displacement, _ = find_mic(
             displacement[None, :], cell=atoms.cell, pbc=atoms.pbc
         )
-        displacement = displacement[0]
-
-        drift_distance = float(np.linalg.norm(displacement))
-        return drift_distance <= max_site_drift
+        adsorbate_site_distance = float(np.linalg.norm(displacement[0]))
+        return adsorbate_site_distance <= max_adsorbate_site_distance
 
     def is_OH_adsorbate_intact(
         self,

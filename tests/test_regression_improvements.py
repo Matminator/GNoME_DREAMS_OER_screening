@@ -143,7 +143,7 @@ def test_update_adsorption_energies_skips_incomplete_studies(prepared_surface_st
     assert pd.isna(row["ideal overpotential"])
 
 
-def test_update_adsorption_energies_computes_o_only_overpotential(
+def test_update_adsorption_energies_does_not_compute_overpotential_without_oh(
     prepared_surface_study,
 ):
     study, surface_study = prepared_surface_study
@@ -173,11 +173,13 @@ def test_update_adsorption_energies_computes_o_only_overpotential(
     row = surface_study.get_adsorption_sites_df().loc[on_top_site_index]
 
     assert row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
-    assert row["ideal overpotential"] == pytest.approx(0.0, abs=1e-8)
     assert pd.isna(row["G(OH)"])
+    assert pd.isna(row["ideal overpotential"])
+    assert pd.isna(row["G(OOH) from scaling relation"])
+    assert pd.isna(row["overpotential from OH-OOH scaling relation"])
 
 
-def test_end_to_end_test_mode_process_updates_candidate_overpotential(
+def test_end_to_end_test_mode_process_keeps_candidate_overpotential_missing_until_oh(
     tmp_path,
     tio2_rutile_atoms,
 ):
@@ -231,8 +233,8 @@ def test_end_to_end_test_mode_process_updates_candidate_overpotential(
     assert updates[p_o] == "completed"
 
     candidate_row = explog.relational_frame.candidates[candidate_id]
-    assert candidate_row.idealOverPotential is not None
-    assert np.isfinite(float(candidate_row.idealOverPotential))
+    assert pd.isna(candidate_row.idealOverPotential)
+    assert pd.isna(candidate_row.Overpotential_from_scaling)
 
 
 def test_many_candidates_many_bulk_processes_are_unique_and_not_overwritten(
@@ -294,7 +296,7 @@ def test_many_candidates_many_bulk_processes_are_unique_and_not_overwritten(
         assert row["status"] == "completed"
 
 
-def test_many_candidates_many_processes_compute_o_energies_and_overpotentials(
+def test_many_candidates_many_processes_compute_o_energies_but_not_overpotentials_without_oh(
     tmp_path, tio2_rutile_atoms
 ):
     explog = Explog()
@@ -373,8 +375,8 @@ def test_many_candidates_many_processes_compute_o_energies_and_overpotentials(
 
     for candidate_id in candidate_ids:
         candidate_row = explog.relational_frame.candidates[candidate_id]
-        assert candidate_row.idealOverPotential is not None
-        assert np.isfinite(float(candidate_row.idealOverPotential))
+        assert pd.isna(candidate_row.idealOverPotential)
+        assert pd.isna(candidate_row.Overpotential_from_scaling)
 
         study = candidate_row.study_obj
         surface_study = study.get_surface_studies()[0]
@@ -383,7 +385,7 @@ def test_many_candidates_many_processes_compute_o_energies_and_overpotentials(
         assert "G(O)" in df.columns
         assert "ideal overpotential" in df.columns
         assert df["G(O)"].notna().any()
-        assert df["ideal overpotential"].notna().any()
+        assert df["ideal overpotential"].isna().all()
 
 
 def test_processes_are_not_overwritten_when_duplicate_process_requested(

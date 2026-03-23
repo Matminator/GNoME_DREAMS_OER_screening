@@ -345,50 +345,58 @@ class OER_surface_study:
             
         return G, None  # Placeholder for now
 
+    @staticmethod
+    def _has_complete_o_oh_energies(row: pd.Series) -> bool:
+        return pd.notna(row.get("G(O)")) and pd.notna(row.get("G(OH)"))
+
     def _compute_overpotentials(self) -> None:
         df = self.get_adsorption_sites_df()
         if df is None:
             return
         
+        derived_cols = [
+            "ideal overpotential",
+            "G(OOH) from scaling relation",
+            "overpotential from OH-OOH scaling relation",
+        ]
+
         for index, row in df.iterrows():
-            G_O = row.get("G(O)", None)
-            G_OH = row.get("G(OH)", None)
-            if G_O is None:
+            # Always clear derived values first so stale values do not
+            # survive if either adsorption free energy becomes missing.
+            for col in derived_cols:
+                df.loc[index, col] = None
+
+            # Skip overpot calc if either G(O), G(OH) is missing:
+            if not self._has_complete_o_oh_energies(row):
                 continue
-            if G_OH is None:
-                # Computing the overpotential, assuming an ideal 
-                # energies of the OOH and OH intermediates based the O 
-                # energy:
-                ideal_overpot = np.abs(G_O - 2.46)/2
-                ideal_overpot = float(np.round(ideal_overpot, 2))
-                df.loc[index, "ideal overpotential"] = ideal_overpot
-            else:
-                # Computing the overpotential, assuming an ideal energy
-                # of the OOH intermediate based on the known energies:
-                G_H2O_OH_step = G_OH 
-                G_OH_O_step = G_O - G_OH
-                G_O_O2_step = (4.92 - G_O)/2
-                ideal_overpot = max(G_H2O_OH_step, G_OH_O_step, 
-                                    G_O_O2_step) - 1.23
-                ideal_overpot = float(np.round(ideal_overpot, 2))
-                df.loc[index, "ideal overpotential"] = ideal_overpot
 
-                # Computing the overpotential, applying the set OH-OOH 
-                # scaling relation:
-                b = self.OER_catalyst_study.OH_OOH_scaling_intercept
-                G_OOH_from_scaling = G_OH + b
-                # set value in df for reference:
-                df.loc[index, "G(OOH) from scaling relation"] = \
-                    G_OOH_from_scaling
+            G_O = row["G(O)"]
+            G_OH = row["G(OH)"]
 
-                G_O_OOH_step = G_OOH_from_scaling - G_O
-                G_OOH_O2_step = 4.92 - G_OOH_from_scaling
-                scaling_overpot = max(G_H2O_OH_step, G_OH_O_step, 
-                                    G_O_OOH_step, G_OOH_O2_step) - 1.23
-                scaling_overpot = float(np.round(scaling_overpot, 2))
-                df.loc[index,
-                        "overpotential from OH-OOH scaling relation"] =\
-                    scaling_overpot
+            # Compute the ideal overpotential:
+            G_H2O_OH_step = G_OH 
+            G_OH_O_step = G_O - G_OH
+            G_O_O2_step = (4.92 - G_O)/2
+            ideal_overpot = max(G_H2O_OH_step, G_OH_O_step, 
+                                G_O_O2_step) - 1.23
+            ideal_overpot = float(np.round(ideal_overpot, 2))
+            df.loc[index, "ideal overpotential"] = ideal_overpot
+
+            # Compute G(OOH) from scaling-relation:
+            b = self.OER_catalyst_study.OH_OOH_scaling_intercept
+            G_OOH_from_scaling = G_OH + b
+            df.loc[index, "G(OOH) from scaling relation"] = \
+                G_OOH_from_scaling
+
+            # Compute overpotential based on OH-OOH scaling relation:
+            G_O_OOH_step = G_OOH_from_scaling - G_O
+            G_OOH_O2_step = 4.92 - G_OOH_from_scaling
+            scaling_overpot = max(G_H2O_OH_step, G_OH_O_step, 
+                                G_O_OOH_step, G_OOH_O2_step) - 1.23
+            scaling_overpot = float(np.round(scaling_overpot, 2))
+            df.loc[index,
+                    "overpotential from OH-OOH scaling relation"] =\
+                scaling_overpot
 
         self.add_sites_df_relaxed = df
 

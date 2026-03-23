@@ -556,6 +556,10 @@ class Job_handler():
         # surfaces.
         frames = []
         for sur_study in sur_studies.values():
+            ad_sites_df = sur_study.get_adsorption_sites_df()
+            if ad_sites_df is None:
+                continue
+
             sur_study.update_adsorption_energies()
             ad_sites_df = sur_study.get_adsorption_sites_df()
             if ad_sites_df is None:

@@ -65,6 +65,11 @@ class OER_adsorption_site_study:
         self.OH_init_atoms = None
         self.relaxed_OH_atoms = None
         self.accepted_relaxed_OH_pairs = []
+        # Direct/manual workflows can expose OH-derived metrics
+        # immediately, while asynchronous Job_handler workflows can
+        # temporarily hide them until all OH initializations are
+        # terminal for this site.
+        self.oh_batch_finalized = True
         
     def get_atoms_for_O_calc(self) -> Atoms:
         return self.atoms_for_O_calc.copy()
@@ -234,6 +239,12 @@ class OER_adsorption_site_study:
             
     def get_adsorption_site_energies(self) -> dict[str, float | None]:
         return self.energies_dict.copy()
+
+    def set_oh_batch_finalized(self, finalized: bool) -> None:
+        self.oh_batch_finalized = bool(finalized)
+
+    def is_oh_batch_finalized(self) -> bool:
+        return bool(self.oh_batch_finalized)
     
     def _remove_O_adsorbate(self) -> Atoms:
         atoms_copy = self.init_surface.copy()

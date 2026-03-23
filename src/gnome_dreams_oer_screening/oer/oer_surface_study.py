@@ -307,8 +307,15 @@ class OER_surface_study:
 
             energies_dict = study.get_adsorption_site_energies()
             E_pure = energies_dict.get("clean_surface_energy", None)
-            
+
             for species in ['O', 'OH']:
+                if species == "OH" and not study.is_oh_batch_finalized():
+                    G = None
+                    df.loc[index, f"G({species})"] = G
+                    df.loc[index, f"G({species}) deviation"] = \
+                        self._compute_deviation_from_optimal(species, G)
+                    continue
+
                 energy_key = f"{species}_adsorbed_energy"
                 E_add = energies_dict.get(energy_key, None)
                 if E_pure is not None and E_add is not None:

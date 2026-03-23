@@ -29,7 +29,7 @@ class Explog:
             "reason_or_hypothesis": pd.Series(dtype=pd.StringDtype()),
             "notes": pd.Series(dtype=pd.StringDtype()),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
-            "G(O) Deviation from optimal": pd.Series(dtype=pd.Float64Dtype()),
+            "G(O) deviation": pd.Series(dtype=pd.Float64Dtype()),
             "Overpotential_from_scaling": pd.Series(dtype=pd.Float64Dtype()),
             "idealOverPotential": pd.Series(dtype=pd.Float64Dtype()) # nullable float (supports <NA>)
 

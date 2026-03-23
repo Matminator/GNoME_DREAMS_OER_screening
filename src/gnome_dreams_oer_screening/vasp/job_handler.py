@@ -528,7 +528,7 @@ class Job_handler():
         self.rframe.candidates[candidate_id].processes[process_id]\
             .slurmID = str(slurm_id)
 
-    def _update_ideal_over_pot(self, candidate_id) -> None:
+    def _update_candidate_oer_metrics(self, candidate_id) -> None:
         cand_row = self.rframe.candidates[candidate_id]
         study = cand_row.df["study_obj"].values[0]
         sur_studies = study.get_surface_studies()
@@ -550,6 +550,7 @@ class Job_handler():
         cand_cols = set(self.rframe.candidates.df.columns.tolist())
 
         metric_to_candidate = {
+            "G(O) deviation": "G(O) deviation",
             "ideal overpotential": "idealOverPotential",
             "overpotential from OH-OOH scaling relation":
                 "Overpotential_from_scaling",
@@ -570,7 +571,6 @@ class Job_handler():
             self.rframe.candidates.set_value(candidate_id, cand_col, 
                                              value)
 
-        
     def update_log(self) -> dict:
 
         updates = {} # Save all updates in dict
@@ -649,7 +649,7 @@ class Job_handler():
                                     atoms, energies=[E]
                                 )
                        
-                            self._update_ideal_over_pot(candt_id)
+                            self._update_candidate_oer_metrics(candt_id)
 
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'completed'
@@ -744,7 +744,7 @@ class Job_handler():
                                 )
                     
                         if unrecoverable_reason is None:
-                            self._update_ideal_over_pot(candt_id)
+                            self._update_candidate_oer_metrics(candt_id)
 
                 if unrecoverable_reason is not None:
                     self.rframe.processes.df.at[idx, 'status'] = \

@@ -175,7 +175,10 @@ def determine_adsorption_sites(
                     df.drop(i, inplace=True)
                     break
 
-    for energy_col in ['G(O)', 'G(OH)', 'G(OOH) from scaling relation',
+    for energy_col in ['G(O)', 'G(O) deviation',
+                        'G(OH)', 'G(OH) deviation',
+                        'G(OOH) from scaling relation',
+                        'G(OOH, scaling) deviation',
                         'ideal overpotential',
                         'overpotential from OH-OOH scaling relation']:
         df[energy_col] = None

@@ -64,7 +64,11 @@ class OER_surface_study:
             The amount of vacuum (in Ångstrom) to add to the surface.
             Default is 14 Ångstrom.
     """
-    
+    OPTIMAL_ADSORPTION_FREE_ENERGIES = {
+        "OH": 1.23,
+        "O": 2.46,
+        "OOH": 3.69,
+    }
 
     def __init__(self, 
                  OER_catalyst_study,
@@ -316,6 +320,8 @@ class OER_surface_study:
                     G = None
 
                 df.loc[index, f"G({species})"] = G
+                df.loc[index, f"G({species}) deviation"] = \
+                    self._compute_deviation_from_optimal(species, G)
 
         self._compute_overpotentials()
             
@@ -345,6 +351,23 @@ class OER_surface_study:
             
         return G, None  # Placeholder for now
 
+    @classmethod
+    def _compute_deviation_from_optimal(
+        cls, species: str, free_energy: float | None
+    ) -> float | None:
+        if pd.isna(free_energy):
+            return None
+
+        optimal_free_energy = cls.OPTIMAL_ADSORPTION_FREE_ENERGIES.get(
+            species
+        )
+        if optimal_free_energy is None:
+            raise ValueError(
+                f"Unsupported species for deviation metric: {species}"
+            )
+
+        return float(np.abs(free_energy - optimal_free_energy))
+
     @staticmethod
     def _has_complete_o_oh_energies(row: pd.Series) -> bool:
         return pd.notna(row.get("G(O)")) and pd.notna(row.get("G(OH)"))
@@ -357,6 +380,7 @@ class OER_surface_study:
         derived_cols = [
             "ideal overpotential",
             "G(OOH) from scaling relation",
+            "G(OOH, scaling) deviation",
             "overpotential from OH-OOH scaling relation",
         ]
 
@@ -387,6 +411,10 @@ class OER_surface_study:
             G_OOH_from_scaling = G_OH + b
             df.loc[index, "G(OOH) from scaling relation"] = \
                 G_OOH_from_scaling
+            df.loc[index, "G(OOH, scaling) deviation"] = \
+                self._compute_deviation_from_optimal(
+                    "OOH", G_OOH_from_scaling
+                )
 
             # Compute overpotential based on OH-OOH scaling relation:
             G_O_OOH_step = G_OOH_from_scaling - G_O

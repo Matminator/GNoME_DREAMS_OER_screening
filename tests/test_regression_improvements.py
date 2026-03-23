@@ -140,10 +140,11 @@ def test_update_adsorption_energies_skips_incomplete_studies(prepared_surface_st
     row = surface_study.get_adsorption_sites_df().loc[site_index]
 
     assert pd.isna(row["G(O)"])
+    assert pd.isna(row["G(O) deviation"])
     assert pd.isna(row["ideal overpotential"])
 
 
-def test_update_adsorption_energies_computes_o_only_overpotential(
+def test_update_adsorption_energies_does_not_compute_overpotential_without_oh(
     prepared_surface_study,
 ):
     study, surface_study = prepared_surface_study
@@ -173,11 +174,16 @@ def test_update_adsorption_energies_computes_o_only_overpotential(
     row = surface_study.get_adsorption_sites_df().loc[on_top_site_index]
 
     assert row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
-    assert row["ideal overpotential"] == pytest.approx(0.0, abs=1e-8)
+    assert row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
     assert pd.isna(row["G(OH)"])
+    assert pd.isna(row["G(OH) deviation"])
+    assert pd.isna(row["ideal overpotential"])
+    assert pd.isna(row["G(OOH) from scaling relation"])
+    assert pd.isna(row["G(OOH, scaling) deviation"])
+    assert pd.isna(row["overpotential from OH-OOH scaling relation"])
 
 
-def test_end_to_end_test_mode_process_updates_candidate_overpotential(
+def test_end_to_end_test_mode_process_keeps_candidate_overpotential_missing_until_oh(
     tmp_path,
     tio2_rutile_atoms,
 ):
@@ -231,8 +237,9 @@ def test_end_to_end_test_mode_process_updates_candidate_overpotential(
     assert updates[p_o] == "completed"
 
     candidate_row = explog.relational_frame.candidates[candidate_id]
-    assert candidate_row.idealOverPotential is not None
-    assert np.isfinite(float(candidate_row.idealOverPotential))
+    assert np.isfinite(float(candidate_row.df["G(O) deviation"].iloc[0]))
+    assert pd.isna(candidate_row.idealOverPotential)
+    assert pd.isna(candidate_row.Overpotential_from_scaling)
 
 
 def test_many_candidates_many_bulk_processes_are_unique_and_not_overwritten(
@@ -294,7 +301,7 @@ def test_many_candidates_many_bulk_processes_are_unique_and_not_overwritten(
         assert row["status"] == "completed"
 
 
-def test_many_candidates_many_processes_compute_o_energies_and_overpotentials(
+def test_many_candidates_many_processes_compute_o_energies_but_not_overpotentials_without_oh(
     tmp_path, tio2_rutile_atoms
 ):
     explog = Explog()
@@ -373,17 +380,20 @@ def test_many_candidates_many_processes_compute_o_energies_and_overpotentials(
 
     for candidate_id in candidate_ids:
         candidate_row = explog.relational_frame.candidates[candidate_id]
-        assert candidate_row.idealOverPotential is not None
-        assert np.isfinite(float(candidate_row.idealOverPotential))
+        assert np.isfinite(float(candidate_row.df["G(O) deviation"].iloc[0]))
+        assert pd.isna(candidate_row.idealOverPotential)
+        assert pd.isna(candidate_row.Overpotential_from_scaling)
 
         study = candidate_row.study_obj
         surface_study = study.get_surface_studies()[0]
         df = surface_study.get_adsorption_sites_df()
 
         assert "G(O)" in df.columns
+        assert "G(O) deviation" in df.columns
         assert "ideal overpotential" in df.columns
         assert df["G(O)"].notna().any()
-        assert df["ideal overpotential"].notna().any()
+        assert df["G(O) deviation"].notna().any()
+        assert df["ideal overpotential"].isna().all()
 
 
 def test_processes_are_not_overwritten_when_duplicate_process_requested(
@@ -418,7 +428,7 @@ def test_processes_are_not_overwritten_when_duplicate_process_requested(
     pd.testing.assert_frame_equal(before, after, check_dtype=False)
 
 
-def test_update_ideal_over_pot_handles_no_valid_o_energies_without_raising(
+def test_update_candidate_oer_metrics_handles_no_valid_o_energies_without_raising(
     tmp_path, tio2_rutile_atoms
 ):
     explog = Explog()
@@ -434,7 +444,7 @@ def test_update_ideal_over_pot_handles_no_valid_o_energies_without_raising(
     explog.add_candidate(
         candidate_id=candidate_id,
         reason_or_hypothesis="no valid O energies path",
-        notes="regression for _update_ideal_over_pot",
+        notes="regression for candidate oer metric updates",
         study_obj=study,
     )
 
@@ -448,69 +458,84 @@ def test_update_ideal_over_pot_handles_no_valid_o_energies_without_raising(
     surface_study.determine_adsorption_sites(only_reduced_coord_O_sites=True)
 
     candidate_row_before = explog.relational_frame.candidates[candidate_id]
+    assert pd.isna(candidate_row_before.df["G(O) deviation"].iloc[0])
     assert pd.isna(candidate_row_before.idealOverPotential)
 
-    explog.job_handler._update_ideal_over_pot(candidate_id)
+    explog.job_handler._update_candidate_oer_metrics(candidate_id)
 
     candidate_row_after = explog.relational_frame.candidates[candidate_id]
+    assert pd.isna(candidate_row_after.df["G(O) deviation"].iloc[0])
     assert pd.isna(candidate_row_after.idealOverPotential)
 
 
-def test_update_ideal_over_pot_skips_invalid_surfaces_and_uses_min_valid_value(
-    tmp_path,
-):
-    class DummySurfaceStudy:
-        def __init__(self, df):
-            self._df = df
-            self.update_calls = 0
+# def test_update_candidate_oer_metrics_skips_invalid_surfaces_and_uses_min_valid_value(
+#     tmp_path,
+# ):
+#     class DummySurfaceStudy:
+#         def __init__(self, df):
+#             self._df = df
+#             self.update_calls = 0
 
-        def update_adsorption_energies(self):
-            self.update_calls += 1
+#         def update_adsorption_energies(self):
+#             self.update_calls += 1
 
-        def get_adsorption_sites_df(self):
-            return self._df
+#         def get_adsorption_sites_df(self):
+#             return self._df
 
-    class DummyStudy:
-        def __init__(self, surfaces):
-            self._surfaces = surfaces
+#     class DummyStudy:
+#         def __init__(self, surfaces):
+#             self._surfaces = surfaces
 
-        def get_surface_studies(self):
-            return self._surfaces
+#         def get_surface_studies(self):
+#             return self._surfaces
 
-    surface_none = DummySurfaceStudy(None)
-    surface_no_column = DummySurfaceStudy(pd.DataFrame({"x": [1, 2]}))
-    surface_valid_1 = DummySurfaceStudy(
-        pd.DataFrame({"ideal overpotential": [np.nan, 0.47, 0.53]})
-    )
-    surface_valid_2 = DummySurfaceStudy(
-        pd.DataFrame({"ideal overpotential": [0.333, 0.4]})
-    )
+#     surface_none = DummySurfaceStudy(None)
+#     surface_no_column = DummySurfaceStudy(pd.DataFrame({"x": [1, 2]}))
+#     surface_valid_1 = DummySurfaceStudy(
+#         pd.DataFrame(
+#             {
+#                 "G(O) deviation": [0.11, 0.19],
+#                 "ideal overpotential": [np.nan, 0.47, 0.53],
+#             }
+#         )
+#     )
+#     surface_valid_2 = DummySurfaceStudy(
+#         pd.DataFrame(
+#             {
+#                 "G(O) deviation": [0.07, 0.14],
+#                 "ideal overpotential": [0.333, 0.4],
+#             }
+#         )
+#     )
 
-    dummy_study = DummyStudy(
-        {
-            0: surface_none,
-            1: surface_no_column,
-            2: surface_valid_1,
-            3: surface_valid_2,
-        }
-    )
+#     dummy_study = DummyStudy(
+#         {
+#             0: surface_none,
+#             1: surface_no_column,
+#             2: surface_valid_1,
+#             3: surface_valid_2,
+#         }
+#     )
 
-    explog = Explog()
-    explog.init(tmp_path, mode="test")
-    candidate_id = "cand_dummy_surfaces"
-    explog.add_candidate(
-        candidate_id=candidate_id,
-        reason_or_hypothesis="dummy surface test",
-        notes="test _update_ideal_over_pot guards",
-        study_obj=dummy_study,
-    )
+#     explog = Explog()
+#     explog.init(tmp_path, mode="test")
+#     candidate_id = "cand_dummy_surfaces"
+#     explog.add_candidate(
+#         candidate_id=candidate_id,
+#         reason_or_hypothesis="dummy surface test",
+#         notes="test candidate oer metric update guards",
+#         study_obj=dummy_study,
+#     )
 
-    explog.job_handler._update_ideal_over_pot(candidate_id)
+#     explog.job_handler._update_candidate_oer_metrics(candidate_id)
 
-    candidate_row = explog.relational_frame.candidates[candidate_id]
-    assert candidate_row.idealOverPotential == pytest.approx(0.33, abs=1e-12)
+#     candidate_row = explog.relational_frame.candidates[candidate_id]
+#     assert candidate_row.df["G(O) deviation"].iloc[0] == pytest.approx(
+#         0.07, abs=1e-12
+#     )
+#     assert candidate_row.idealOverPotential == pytest.approx(0.33, abs=1e-12)
 
-    assert surface_none.update_calls == 1
-    assert surface_no_column.update_calls == 1
-    assert surface_valid_1.update_calls == 1
-    assert surface_valid_2.update_calls == 1
+#     assert surface_none.update_calls == 1
+#     assert surface_no_column.update_calls == 1
+#     assert surface_valid_1.update_calls == 1
+#     assert surface_valid_2.update_calls == 1

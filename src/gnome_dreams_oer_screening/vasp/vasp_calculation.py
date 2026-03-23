@@ -179,7 +179,10 @@ class calculational_setup():
             K_O = (-14.217) - 0.070 - (-6.77)
             K_OH = 0.361 + (-6.77)/2 - (-14.217)
             x = 2.46 + K_O
-            y = 1.23 - 2*x + K_OH
+            # Choose the OH offset so the test-mode free energy is
+            # centered near G(OH)=1.23 eV for an OH system, given that
+            # OH adds one O and one H relative to the clean surface.
+            y = 2*x + K_OH - 1.23
             
             if 'dummy' in self.mode:
                 random_factor = 0

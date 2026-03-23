@@ -56,7 +56,7 @@ class OER_catalyst_study:
     the method 'initialize_oer_surface_study', and stored in a 
     dictionary, with miller indices as keys. Surface structures with 
     adsorbates are managed in the OER_surface_study instances. Gas phase
-    free energies of H2O, H2, O2 are stored in this class, in addition 
+    free energies of H2O and H2 are stored in this class, in addition 
     to initial corrections (correction = ZPE + Cp - TS) to be applied to
     adsorption energies.
 
@@ -65,8 +65,6 @@ class OER_catalyst_study:
         catalyst.
         H2O_gas_free_energy (float): Free energy of H2O in gas phase.
         H2_gas_free_energy (float): Free energy of H2 in gas phase.
-        O2_gas_free_energy (float, optional): Free energy of O2 in gas
-        phase.
         default_O_ad_correction (float, optional): Default correction
         made to the DFT O* adsorption energy.
         default_OH_ad_correction (float, optional): Default correction
@@ -80,7 +78,6 @@ class OER_catalyst_study:
     def __init__(self, init_atoms: Atoms,
                  H2O_gas_free_energy: float,
                  H2_gas_free_energy: float,
-                 O2_gas_free_energy: float | None = None,
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
@@ -106,7 +103,6 @@ class OER_catalyst_study:
         self.species_energies = {
             'H2O_gas_free_energy': H2O_gas_free_energy,
             'H2_gas_free_energy': H2_gas_free_energy,
-            'O2_gas_free_energy': O2_gas_free_energy,
             'O_ad_correction': default_O_ad_correction,
             'OH_ad_correction': default_OH_ad_correction,
             'OOH_ad_correction': default_OOH_ad_correction,
@@ -171,7 +167,6 @@ class OER_catalyst_study:
     def set_energies(self,
             H2O_gas_free_energy: float | None = None,
             H2_gas_free_energy: float | None = None,
-            O2_gas_free_energy: float | None = None,
             O_ad_correction: float | None = None,
             OH_ad_correction: float | None = None,
             OOH_ad_correction: float | None = None,
@@ -182,9 +177,6 @@ class OER_catalyst_study:
         if H2_gas_free_energy is not None:
             self.species_energies['H2_gas_free_energy'] = \
                 H2_gas_free_energy
-        if O2_gas_free_energy is not None:
-            self.species_energies['O2_gas_free_energy'] = \
-                O2_gas_free_energy
         if O_ad_correction is not None:
             self.species_energies['O_ad_correction'] = \
                 O_ad_correction
@@ -195,7 +187,7 @@ class OER_catalyst_study:
             self.species_energies['OOH_ad_correction'] = \
                 OOH_ad_correction
 
-    def get_gas_and_energy_corrections(self) -> dict[str, float | None]:
+    def get_gas_and_energy_corrections(self) -> dict[str, float]:
         return self.species_energies.copy()
 
     def get_bulk_atoms(self) -> Atoms | None:

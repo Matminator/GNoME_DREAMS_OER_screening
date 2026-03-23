@@ -70,6 +70,8 @@ class Job_handler():
         The method rejects creating a new process when a non-failed
         process already exists for the same candidate and the same
         `(job_type, termination_index, site_index)` combination.
+        For `OH_adsorption`, it also rejects creating a new batch if
+        OH jobs for the same site have already been submitted once.
 
         Args:
             candidate_id:
@@ -91,9 +93,10 @@ class Job_handler():
 
         Raises:
             RuntimeError:
-                If the generated process id already exists, or if a
+                If the generated process id already exists, if a
                 non-failed matching process already exists for the
-                candidate.
+                candidate, or if an OH batch has already been
+                submitted for the same site.
             KeyError:
                 If `candidate_id` does not exist in the candidates
                 table.
@@ -125,7 +128,11 @@ class Job_handler():
         else:
             site_mask = pdf["site_index"] == site_index
 
-        pdf = pdf[mask & termination_mask & site_mask]
+        matching_pdf = pdf[termination_mask & site_mask]
+        pdf = matching_pdf[
+            (matching_pdf["status"] != "failed")
+            & (matching_pdf["job_type"] == job_type)
+        ]
 
         # If non-finished or completed calculation exists: non-valied:
         non_valid_calc = not pdf.empty 
@@ -228,9 +235,20 @@ class Job_handler():
                     "A new O_adsorption process must not be created."
                 )
             
-            # TODO: What should be done about the OH calculations???
-            # if job_type == "OH_adsorption" and \
-            #         ad_study.relaxed_OH_atoms is not None:
+            if job_type == "OH_adsorption":
+                submitted_oh_rows = matching_pdf[
+                    (matching_pdf["job_type"] == "OH_adsorption")
+                    & (matching_pdf["status"] != "un-submitted")
+                ]
+                if not submitted_oh_rows.empty:
+                    states = submitted_oh_rows["status"].tolist()
+                    raise RuntimeError(
+                        "OH adsorption jobs have already been "
+                        f"submitted for site_index={site_index} on "
+                        f"termination_index={termination_index}. "
+                        "A new OH_adsorption batch must not be "
+                        f"created. Existing statuses: {states}"
+                    )
 
 
         # --------------------------------------------------------------
@@ -271,6 +289,7 @@ class Job_handler():
         # For OH adsorption, create one process per OH initialization.
         if job_type == "OH_adsorption":
             oh_inits = ad_study.get_OH_adsorbed_atoms()
+            ad_study.set_oh_batch_finalized(False)
             process_ids = []
             for oh_init_index in range(len(oh_inits)):
                 if note is None:
@@ -528,7 +547,7 @@ class Job_handler():
         self.rframe.candidates[candidate_id].processes[process_id]\
             .slurmID = str(slurm_id)
 
-    def _update_ideal_over_pot(self, candidate_id) -> None:
+    def _update_candidate_oer_metrics(self, candidate_id) -> None:
         cand_row = self.rframe.candidates[candidate_id]
         study = cand_row.df["study_obj"].values[0]
         sur_studies = study.get_surface_studies()
@@ -550,6 +569,7 @@ class Job_handler():
         cand_cols = set(self.rframe.candidates.df.columns.tolist())
 
         metric_to_candidate = {
+            "G(O) deviation": "G(O) deviation",
             "ideal overpotential": "idealOverPotential",
             "overpotential from OH-OOH scaling relation":
                 "Overpotential_from_scaling",
@@ -570,7 +590,60 @@ class Job_handler():
             self.rframe.candidates.set_value(candidate_id, cand_col, 
                                              value)
 
-        
+    @staticmethod
+    def _is_terminal_process_status(status) -> bool:
+        if not isinstance(status, str):
+            return False
+        return status in {"completed", "failed"} or status.startswith(
+            "unrecoverable"
+        )
+
+    def _get_adsorption_site_study(
+        self,
+        candidate_id: str,
+        termination_index,
+        site_index,
+    ):
+        if pd.isna(termination_index) or pd.isna(site_index):
+            raise ValueError(
+                "Adsorption-site lookup requires non-missing "
+                "termination_index and site_index."
+            )
+
+        term_idx = int(termination_index)
+        site_idx = int(site_index)
+        study = self.rframe.candidates[candidate_id].df[
+            "study_obj"
+        ].values[0]
+        surface_study = study.get_surface_studies()[term_idx]
+        return surface_study.get_adsorption_site_studies_dict()[site_idx]
+
+    def _refresh_oh_batch_finalization_state(
+        self,
+        candidate_id: str,
+        termination_index,
+        site_index,
+    ) -> bool:
+        ad_study = self._get_adsorption_site_study(
+            candidate_id, termination_index, site_index
+        )
+        pdf = self.rframe.processes.df
+        term_idx = int(termination_index)
+        site_idx = int(site_index)
+        oh_rows = pdf[
+            (pdf["candidate_id"] == candidate_id)
+            & (pdf["job_type"] == "OH_adsorption")
+            & (pdf["termination_index"] == term_idx)
+            & (pdf["site_index"] == site_idx)
+        ]
+
+        all_terminal = (
+            not oh_rows.empty
+            and oh_rows["status"].apply(self._is_terminal_process_status).all()
+        )
+        ad_study.set_oh_batch_finalized(all_terminal)
+        return bool(all_terminal)
+
     def update_log(self) -> dict:
 
         updates = {} # Save all updates in dict
@@ -648,19 +721,31 @@ class Job_handler():
                                 ad_study.set_relaxed_OH_calc(
                                     atoms, energies=[E]
                                 )
-                       
-                            self._update_ideal_over_pot(candt_id)
 
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'completed'
                     
                     updates[pdf_row['process_id']] = 'completed'
 
+                    if job_type == 'O_adsorption':
+                        self._update_candidate_oer_metrics(candt_id)
+                    elif job_type == 'OH_adsorption':
+                        oh_batch_ready = \
+                            self._refresh_oh_batch_finalization_state(
+                                candt_id, termination_index, site_index
+                            )
+                        if oh_batch_ready:
+                            self._update_candidate_oer_metrics(candt_id)
+
         else:
             r_pdf = self.rframe.processes.df.copy()
             r_pdf = r_pdf[r_pdf['status'] == 'updating']
             for idx, pdf_row in r_pdf.iterrows():
                 vasp_dir = Path(pdf_row['VASP_dir'])
+                job_type = pdf_row['job_type']
+                termination_index = pdf_row['termination_index']
+                site_index = pdf_row['site_index']
+                candt_id = pdf_row['candidate_id']
 
                 if self.mode == 'MLIP_test':
                     try:
@@ -677,6 +762,17 @@ class Job_handler():
                         self.rframe.processes.df.at[idx, 'status'] \
                             = 'failed'
                         updates[pdf_row['process_id']] = 'failed'
+                        if job_type == 'OH_adsorption':
+                            oh_batch_ready = \
+                                self._refresh_oh_batch_finalization_state(
+                                    candt_id,
+                                    termination_index,
+                                    site_index,
+                                )
+                            if oh_batch_ready:
+                                self._update_candidate_oer_metrics(
+                                    candt_id
+                                )
                         continue
 
                 else:
@@ -687,12 +783,19 @@ class Job_handler():
                         self.rframe.processes.df.at[idx, 'status'] \
                             = 'failed'
                         updates[pdf_row['process_id']] = 'failed'
+                        if job_type == 'OH_adsorption':
+                            oh_batch_ready = \
+                                self._refresh_oh_batch_finalization_state(
+                                    candt_id,
+                                    termination_index,
+                                    site_index,
+                                )
+                            if oh_batch_ready:
+                                self._update_candidate_oer_metrics(
+                                    candt_id
+                                )
                         continue
-                
-                job_type = pdf_row['job_type']
-                termination_index = pdf_row['termination_index']
-                site_index = pdf_row['site_index']
-                candt_id = pdf_row['candidate_id']
+
                 cand_row = self.rframe.candidates[candt_id]
                 study = cand_row.df['study_obj'].values[0]
                 unrecoverable_reason = None
@@ -742,18 +845,30 @@ class Job_handler():
                                     else "Relaxed OH structure rejected"
                                     "by study sanity checks."
                                 )
-                    
-                        if unrecoverable_reason is None:
-                            self._update_ideal_over_pot(candt_id)
 
                 if unrecoverable_reason is not None:
                     self.rframe.processes.df.at[idx, 'status'] = \
                         "unrecoverable: " + unrecoverable_reason
                     updates[pdf_row['process_id']] = 'unrecoverable'
+                    if job_type == 'OH_adsorption':
+                        oh_batch_ready = \
+                            self._refresh_oh_batch_finalization_state(
+                                candt_id, termination_index, site_index
+                            )
+                        if oh_batch_ready:
+                            self._update_candidate_oer_metrics(candt_id)
                     continue
 
                 self.rframe.processes.df.at[idx, 'status'] = \
                     'completed'
                 updates[pdf_row['process_id']] = 'completed'
+                if job_type == 'O_adsorption':
+                    self._update_candidate_oer_metrics(candt_id)
+                elif job_type == 'OH_adsorption':
+                    oh_batch_ready = self._refresh_oh_batch_finalization_state(
+                        candt_id, termination_index, site_index
+                    )
+                    if oh_batch_ready:
+                        self._update_candidate_oer_metrics(candt_id)
 
         return updates

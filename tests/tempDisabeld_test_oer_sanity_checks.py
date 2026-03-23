@@ -46,12 +46,16 @@ def test_is_adsorbate_near_site_detects_drift():
     study = _build_simple_on_top_study()
     O_atoms = study.get_atoms_for_O_calc()
 
-    assert is_adsorbate_near_site(study, O_atoms, max_site_drift=0.2)
+    assert is_adsorbate_near_site(
+        study,
+        O_atoms,
+        max_adsorbate_site_distance=0.2,
+    )
 
     drifted_O_atoms = O_atoms.copy()
     drifted_O_atoms[1].position += np.array([0.0, 0.0, 2.0])
     assert not is_adsorbate_near_site(
-        study, drifted_O_atoms, max_site_drift=1.0
+        study, drifted_O_atoms, max_adsorbate_site_distance=1.0
     )
 
 

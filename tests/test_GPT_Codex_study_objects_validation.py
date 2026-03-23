@@ -63,8 +63,11 @@ def test_adsorption_site_dataframe_uses_new_energy_columns(
 
     expected_cols = [
         "G(O)",
+        "G(O) deviation",
         "G(OH)",
+        "G(OH) deviation",
         "G(OOH) from scaling relation",
+        "G(OOH, scaling) deviation",
         "ideal overpotential",
         "overpotential from OH-OOH scaling relation",
     ]
@@ -134,10 +137,210 @@ def test_update_adsorption_energies_populates_g_and_scaling_columns(
     row = surface_study.get_adsorption_sites_df().loc[site_index]
 
     assert row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
+    assert row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
     assert row["G(OH)"] == pytest.approx(target_g_oh, abs=1e-8)
+    assert row["G(OH) deviation"] == pytest.approx(0.37, abs=1e-8)
     assert not pd.isna(row["ideal overpotential"])
     assert not pd.isna(row["G(OOH) from scaling relation"])
+    assert row["G(OOH, scaling) deviation"] == pytest.approx(1.11, abs=1e-8)
     assert not pd.isna(row["overpotential from OH-OOH scaling relation"])
+
+
+def test_update_adsorption_energies_with_only_o_populates_only_o_deviation(
+    prepared_surface_and_study,
+):
+    study, surface_study = prepared_surface_and_study
+    study = copy.deepcopy(study)
+    surface_study = copy.deepcopy(surface_study)
+
+    df = surface_study.get_adsorption_sites_df()
+    site_index = _get_on_top_site_index(df)
+
+    surface_study.initialize_adsorption_site_study(site_index)
+    ad_study = surface_study.get_adsorption_site_studies_dict()[site_index]
+
+    energies = ad_study.get_adsorption_site_energies()
+    clean_energy = energies["clean_surface_energy"]
+    assert clean_energy is not None
+
+    constants = study.get_gas_and_energy_corrections()
+    target_g_o = 2.61
+    expected_deviation = 0.15
+
+    e_o = (
+        clean_energy
+        + target_g_o
+        - constants["O_ad_correction"]
+        - 2 * (constants["H2_gas_free_energy"] / 2)
+        + constants["H2O_gas_free_energy"]
+    )
+
+    ok_o, msg_o = ad_study.set_relaxed_O_calc(
+        ad_study.get_atoms_for_O_calc(),
+        energy=e_o,
+    )
+    assert ok_o is True
+    assert msg_o is None
+
+    surface_study.update_adsorption_energies()
+    row = surface_study.get_adsorption_sites_df().loc[site_index]
+
+    assert row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
+    assert row["G(O) deviation"] == pytest.approx(
+        expected_deviation, abs=1e-8
+    )
+    assert pd.isna(row["G(OH)"])
+    assert pd.isna(row["G(OH) deviation"])
+    assert pd.isna(row["G(OOH) from scaling relation"])
+    assert pd.isna(row["G(OOH, scaling) deviation"])
+    assert pd.isna(row["ideal overpotential"])
+    assert pd.isna(row["overpotential from OH-OOH scaling relation"])
+
+
+def test_update_adsorption_energies_hides_oh_metrics_until_batch_finalized(
+    prepared_surface_and_study,
+):
+    study, surface_study = prepared_surface_and_study
+    study = copy.deepcopy(study)
+    surface_study = copy.deepcopy(surface_study)
+
+    df = surface_study.get_adsorption_sites_df()
+    site_index = _get_on_top_site_index(df)
+
+    surface_study.initialize_adsorption_site_study(site_index)
+    ad_study = surface_study.get_adsorption_site_studies_dict()[site_index]
+
+    energies = ad_study.get_adsorption_site_energies()
+    clean_energy = energies["clean_surface_energy"]
+    assert clean_energy is not None
+
+    constants = study.get_gas_and_energy_corrections()
+    target_g_o = 2.46
+    target_g_oh = 1.60
+
+    e_o = (
+        clean_energy
+        + target_g_o
+        - constants["O_ad_correction"]
+        - 2 * (constants["H2_gas_free_energy"] / 2)
+        + constants["H2O_gas_free_energy"]
+    )
+    e_oh = (
+        clean_energy
+        + target_g_oh
+        - constants["OH_ad_correction"]
+        - (constants["H2_gas_free_energy"] / 2)
+        + constants["H2O_gas_free_energy"]
+    )
+
+    ok_o, msg_o = ad_study.set_relaxed_O_calc(
+        ad_study.get_atoms_for_O_calc(),
+        energy=e_o,
+    )
+    assert ok_o is True
+    assert msg_o is None
+
+    ok_oh, msg_oh = ad_study.set_relaxed_OH_calc(
+        ad_study.get_OH_adsorbed_atoms()[0],
+        energies=[e_oh],
+    )
+    assert ok_oh is True
+    assert msg_oh is None
+
+    ad_study.set_oh_batch_finalized(False)
+    surface_study.update_adsorption_energies()
+    partial_row = surface_study.get_adsorption_sites_df().loc[site_index]
+
+    assert partial_row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
+    assert partial_row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
+    assert pd.isna(partial_row["G(OH)"])
+    assert pd.isna(partial_row["G(OH) deviation"])
+    assert pd.isna(partial_row["G(OOH) from scaling relation"])
+    assert pd.isna(partial_row["G(OOH, scaling) deviation"])
+    assert pd.isna(partial_row["ideal overpotential"])
+    assert pd.isna(partial_row["overpotential from OH-OOH scaling relation"])
+
+    ad_study.set_oh_batch_finalized(True)
+    surface_study.update_adsorption_energies()
+    final_row = surface_study.get_adsorption_sites_df().loc[site_index]
+
+    assert final_row["G(OH)"] == pytest.approx(target_g_oh, abs=1e-8)
+    assert final_row["G(OH) deviation"] == pytest.approx(0.37, abs=1e-8)
+    assert pd.notna(final_row["G(OOH) from scaling relation"])
+    assert pd.notna(final_row["G(OOH, scaling) deviation"])
+    assert pd.notna(final_row["ideal overpotential"])
+    assert pd.notna(final_row["overpotential from OH-OOH scaling relation"])
+
+
+def test_update_adsorption_energies_clears_stale_derived_columns_when_oh_missing(
+    prepared_surface_and_study,
+):
+    study, surface_study = prepared_surface_and_study
+    study = copy.deepcopy(study)
+    surface_study = copy.deepcopy(surface_study)
+
+    df = surface_study.get_adsorption_sites_df()
+    site_index = _get_on_top_site_index(df)
+
+    surface_study.initialize_adsorption_site_study(site_index)
+    ad_study = surface_study.get_adsorption_site_studies_dict()[site_index]
+
+    energies = ad_study.get_adsorption_site_energies()
+    clean_energy = energies["clean_surface_energy"]
+    assert clean_energy is not None
+
+    constants = study.get_gas_and_energy_corrections()
+    target_g_o = 2.46
+    target_g_oh = 1.60
+
+    e_o = (
+        clean_energy
+        + target_g_o
+        - constants["O_ad_correction"]
+        - 2 * (constants["H2_gas_free_energy"] / 2)
+        + constants["H2O_gas_free_energy"]
+    )
+    e_oh = (
+        clean_energy
+        + target_g_oh
+        - constants["OH_ad_correction"]
+        - (constants["H2_gas_free_energy"] / 2)
+        + constants["H2O_gas_free_energy"]
+    )
+
+    ok_o, _ = ad_study.set_relaxed_O_calc(
+        ad_study.get_atoms_for_O_calc(),
+        energy=e_o,
+    )
+    ok_oh, _ = ad_study.set_relaxed_OH_calc(
+        ad_study.get_OH_adsorbed_atoms()[0],
+        energies=[e_oh],
+    )
+    assert ok_o is True
+    assert ok_oh is True
+
+    surface_study.update_adsorption_energies()
+    populated_row = surface_study.get_adsorption_sites_df().loc[site_index]
+    assert pd.notna(populated_row["G(OOH, scaling) deviation"])
+    assert pd.notna(populated_row["ideal overpotential"])
+
+    # Simulate the OH result becoming unavailable and ensure a fresh
+    # update clears all derived OH/OOH/overpotential fields.
+    ad_study.relaxed_OH_atoms = None
+    ad_study.accepted_relaxed_OH_pairs = []
+    ad_study.energies_dict["OH_adsorbed_energy"] = None
+
+    surface_study.update_adsorption_energies()
+    cleared_row = surface_study.get_adsorption_sites_df().loc[site_index]
+
+    assert cleared_row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
+    assert cleared_row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
+    assert pd.isna(cleared_row["G(OH)"])
+    assert pd.isna(cleared_row["G(OH) deviation"])
+    assert pd.isna(cleared_row["G(OOH) from scaling relation"])
+    assert pd.isna(cleared_row["G(OOH, scaling) deviation"])
+    assert pd.isna(cleared_row["ideal overpotential"])
+    assert pd.isna(cleared_row["overpotential from OH-OOH scaling relation"])
 
 
 def test_set_relaxed_oh_calc_keeps_lowest_energy_across_calls(

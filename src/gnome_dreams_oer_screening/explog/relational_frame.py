@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 import pandas as pd
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,7 @@ class Table:
         if column not in self.df.columns:
             if not allow_new_columns:
                 raise AttributeError(f"Unknown column '{column}' on table '{self.name}'")
-            self.df[column] = pd.NA
+            self.df[column] = np.nan
 
         mask = (self.df[self.pk] == pk_value)
         if not mask.any():
@@ -294,10 +295,10 @@ class Table:
                     f"Pass allow_new_columns=True to add them."
                 )
             for c in sorted(incoming_cols - existing_cols):
-                self.df[c] = pd.NA
+                self.df[c] = np.nan
 
         # align to current schema (fill missing with NA)
-        aligned = {c: row.get(c, pd.NA) for c in self.df.columns}
+        aligned = {c: row.get(c, np.nan) for c in self.df.columns}
 
         if exists:
             if not allow_update:
@@ -306,7 +307,11 @@ class Table:
             for k, v in row.items():
                 self.df.loc[exists_mask, k] = v
         else:
-            self.df = pd.concat([self.df, pd.DataFrame([aligned])], ignore_index=True)
+            new_row = pd.DataFrame({
+                c: pd.Series([aligned[c]], dtype=self.df.dtypes[c])
+                for c in self.df.columns
+            })
+            self.df = pd.concat([self.df, new_row], ignore_index=True)
 
         return self[pk_val]
 
@@ -475,4 +480,3 @@ class RelationalFrame:
 
     def __repr__(self) -> str:
         return f"<RelationalFrame root={self.root} tables={list(self._tables.keys())}>"
-

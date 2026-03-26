@@ -541,6 +541,13 @@ def test_test_mode_workflow_yields_near_ideal_oh_energy_when_noise_is_zero(
     explog.submit_process(p_o)
     updates = explog.update_log()
     assert updates[p_o] == "completed"
+    p_o_row = explog.relational_frame.processes[p_o].df.iloc[0]
+    assert p_o_row["G(O)"] == pytest.approx(2.46, abs=1e-8)
+    assert p_o_row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
+    assert pd.isna(p_o_row["G(OH)"])
+    assert pd.isna(p_o_row["G(OH) deviation"])
+    assert pd.isna(p_o_row["ideal overpotential"])
+    assert pd.isna(p_o_row["overpotential from OH-OOH scaling relation"])
 
     p_oh = explog.add_process(
         candidate_id=candidate_id,
@@ -556,6 +563,16 @@ def test_test_mode_workflow_yields_near_ideal_oh_energy_when_noise_is_zero(
     updates = explog.update_log()
     assert set(updates.keys()) == set(p_oh)
     assert set(updates.values()) == {"completed"}
+    for p_id in p_oh:
+        p_row = explog.relational_frame.processes[p_id].df.iloc[0]
+        assert p_row["G(O)"] == pytest.approx(2.46, abs=1e-8)
+        assert p_row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
+        assert p_row["G(OH)"] == pytest.approx(1.23, abs=1e-8)
+        assert p_row["G(OH) deviation"] == pytest.approx(0.0, abs=1e-8)
+        assert p_row["ideal overpotential"] == pytest.approx(0.0,
+                                                             abs=1e-8)
+        assert p_row["overpotential from OH-OOH scaling relation"] == \
+            pytest.approx(0.74, abs=1e-8)
 
     row = surface_study.get_adsorption_sites_df().loc[site_index]
     candidate_row = explog.relational_frame.candidates[candidate_id]

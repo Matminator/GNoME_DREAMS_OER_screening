@@ -45,7 +45,21 @@ class Explog:
             'termination_index': pd.Series(dtype=pd.Int64Dtype()), # nullable integer (supports <NA>)
             'site_index': pd.Series(dtype=pd.Int64Dtype()),       # nullable integer (supports <NA>)
             "VASP_dir": pd.Series(dtype=pd.StringDtype()),
-            "processNote": pd.Series(dtype=pd.StringDtype())
+            "processNote": pd.Series(dtype=pd.StringDtype()),
+            "G(O)": pd.Series(dtype=pd.Float64Dtype()),
+            "G(O) deviation": pd.Series(dtype=pd.Float64Dtype()),
+            "G(OH)": pd.Series(dtype=pd.Float64Dtype()),
+            "G(OH) deviation": pd.Series(dtype=pd.Float64Dtype()),
+            "G(OOH) from scaling relation": pd.Series(
+                dtype=pd.Float64Dtype()
+            ),
+            "G(OOH, scaling) deviation": pd.Series(
+                dtype=pd.Float64Dtype()
+            ),
+            "ideal overpotential": pd.Series(dtype=pd.Float64Dtype()),
+            "overpotential from OH-OOH scaling relation": pd.Series(
+                dtype=pd.Float64Dtype()
+            ),
         })
         rf.add_table("processes", process_df, pk="process_id")
 

@@ -17,6 +17,16 @@ from gnome_dreams_oer_screening import get_my_jobs_status
     
 
 class Job_handler():
+    PROCESS_METRIC_COLUMNS = [
+        "G(O)",
+        "G(O) deviation",
+        "G(OH)",
+        "G(OH) deviation",
+        "G(OOH) from scaling relation",
+        "G(OOH, scaling) deviation",
+        "ideal overpotential",
+        "overpotential from OH-OOH scaling relation",
+    ]
 
     def __init__(self, 
         rframe: RelationalFrame,
@@ -548,13 +558,20 @@ class Job_handler():
             .slurmID = str(slurm_id)
 
     def _update_candidate_oer_metrics(self, candidate_id) -> None:
+        """
+        Update candidate-level OER summary metrics from site studies.
+
+        The method recomputes adsorption metrics on all initialized
+        surface studies and stores best available values in the
+        candidate table (minimum deviations/overpotentials).
+        """
         cand_row = self.rframe.candidates[candidate_id]
         study = cand_row.df["study_obj"].values[0]
         sur_studies = study.get_surface_studies()
 
         # Gather all currently available adsorption-site rows across
         # surfaces.
-        frames = []
+        all_ad_site_dfs = []
         for sur_study in sur_studies.values():
             ad_sites_df = sur_study.get_adsorption_sites_df()
             if ad_sites_df is None:
@@ -566,18 +583,31 @@ class Job_handler():
                 continue
             if len(ad_sites_df) == 0:
                 continue
-            frames.append(ad_sites_df.copy())
+            all_ad_site_dfs.append(ad_sites_df.copy())
 
-        ad_df = pd.concat(frames, ignore_index=True
-                          ) if len(frames) > 0 else None
+        # Concatenate all site dfs into one df:
+        ad_df = pd.concat(all_ad_site_dfs, ignore_index=True
+                          ) if len(all_ad_site_dfs) > 0 else None
+        
+        # Get all cols:
         cand_cols = set(self.rframe.candidates.df.columns.tolist())
 
+        # Map source metric names in adsorption-site DataFrames (ad_df)
+        # to summary columns in the candidates table.
+        # This keeps detailed site-level labels while supporting stable
+        # candidate-level names used elsewhere:
         metric_to_candidate = {
             "G(O) deviation": "G(O) deviation",
             "ideal overpotential": "idealOverPotential",
             "overpotential from OH-OOH scaling relation":
                 "Overpotential_from_scaling",
         }
+
+        # For each mapping pair:
+        # - metric_col: source metric in ad_df
+        # - cand_col: summary field in candidates
+        # Write the best available value across all sites
+        # (minimum non-NaN) so candidates can be compared/ranked.
         for metric_col, cand_col in metric_to_candidate.items():
             if cand_col not in cand_cols:
                 continue
@@ -621,6 +651,157 @@ class Job_handler():
         ].values[0]
         surface_study = study.get_surface_studies()[term_idx]
         return surface_study.get_adsorption_site_studies_dict()[site_idx]
+
+    def _get_adsorption_site_metrics_row(
+        self,
+        candidate_id: str,
+        termination_index,
+        site_index,
+    ) -> pd.Series | None:
+        """
+        Return the adsorption-site metrics row for one site, or None.
+
+        The row is taken from the site's updated adsorption-sites
+        DataFrame for the given candidate, termination index, and site
+        index.
+        """
+        
+        # If nan are passed, no mestrics can be retrieved, return None:
+        if pd.isna(termination_index) or pd.isna(site_index):
+            return None
+
+        # Get study object from candidate row:
+        term_idx = int(termination_index)
+        site_idx = int(site_index)
+        study = self.rframe.candidates[candidate_id].df[
+            "study_obj"
+        ].values[0]
+
+        # Get surface study dict:
+        surface_studies = study.get_surface_studies()
+        # Test that the specific surface study exists:
+        if term_idx not in surface_studies:
+            return None
+        surface_study = surface_studies[term_idx]
+
+        # Get adsorption sites dataframe from surface study:
+        ad_sites_df = surface_study.get_adsorption_sites_df()
+        if ad_sites_df is None:
+            return None
+        
+        # Make sure the lates data is in the df:
+        surface_study.update_adsorption_energies()
+        # Get updated df:
+        ad_sites_df = surface_study.get_adsorption_sites_df()
+        
+        # NOTE: checks below should never be needed, as test is above.
+        # if ad_sites_df is None or len(ad_sites_df) == 0:
+        #     return None
+        # if "Site index" not in ad_sites_df.columns:
+        #     return None
+
+        site_rows = ad_sites_df[ad_sites_df["Site index"] == site_idx]
+        if site_rows.empty:
+            return None
+
+        return site_rows.iloc[0]
+
+    def _set_process_oer_metrics_from_site_row(
+        self,
+        process_id,
+        site_metrics_row: pd.Series | None,
+    ) -> None:
+        """
+        Write site-level OER metric values into one process row.
+
+        Missing metrics (or missing site row) are stored as NaN.
+        """
+        
+        # Ensure string process id for indexing:
+        process_id = str(process_id)
+
+        # Iterate over process cols:
+        process_cols = set(self.rframe.processes.df.columns.tolist())
+        for metric_col in self.PROCESS_METRIC_COLUMNS:
+            # If col not in process df, skip:
+            if metric_col not in process_cols:
+                continue
+
+            # Init value (to be used in the metric_col) as nan:
+            value = np.nan
+            if site_metrics_row is not None:
+                raw = site_metrics_row.get(metric_col, np.nan)
+                if pd.notna(raw):
+                    value = float(raw)
+
+            # Update process row with the metric value:
+            self.rframe.processes.set_value(
+                process_id,
+                metric_col,
+                value,
+            )
+
+    def _update_process_oer_metrics(
+        self,
+        process_id,
+        candidate_id: str,
+        termination_index,
+        site_index,
+    ) -> None:
+        """
+        Refresh one process row from the current site metrics.
+
+        The method fetches the matching site metrics row and writes its
+        OER metric values to the process table.
+        """
+
+        # Get the adsorption-site metrics row for the process:
+        site_metrics_row = self._get_adsorption_site_metrics_row(
+            candidate_id,
+            termination_index,
+            site_index,
+        )
+        
+        # Set the process OER metrics:
+        self._set_process_oer_metrics_from_site_row(
+            process_id,
+            site_metrics_row,
+        )
+
+    def _update_oh_batch_process_oer_metrics(
+        self,
+        candidate_id: str,
+        termination_index: int | str,
+        site_index: int | str,
+    ) -> None:
+        """
+        Refresh process-level OER metrics for all OH jobs on one site.
+
+        Each OH process row for the given candidate/termination/site is
+        updated from the current site metrics.
+        """
+        
+        # Return if identifiers are not provided:
+        if pd.isna(termination_index) or pd.isna(site_index):
+            return
+
+        term_idx = int(termination_index)
+        site_idx = int(site_index)
+        pdf = self.rframe.processes.df
+        oh_rows = pdf[
+            (pdf["candidate_id"] == candidate_id)
+            & (pdf["job_type"] == "OH_adsorption")
+            & (pdf["termination_index"] == term_idx)
+            & (pdf["site_index"] == site_idx)
+        ]
+
+        for process_id in oh_rows["process_id"].tolist():
+            self._update_process_oer_metrics(
+                process_id,
+                candidate_id,
+                termination_index,
+                site_index,
+            )
 
     def _refresh_oh_batch_finalization_state(
         self,
@@ -701,6 +882,7 @@ class Job_handler():
 
                     candt_id = pdf_row['candidate_id']
                     cand_row = self.rframe.candidates[candt_id]
+                    process_id = pdf_row['process_id']
                     study = cand_row.df['study_obj'].values[0]
                     
                     job_type = pdf_row['job_type']
@@ -729,9 +911,12 @@ class Job_handler():
                     self.rframe.processes.df.at[idx, 'status'] = \
                         'completed'
                     
-                    updates[pdf_row['process_id']] = 'completed'
+                    updates[process_id] = 'completed'
 
                     if job_type == 'O_adsorption':
+                        self._update_process_oer_metrics(
+                            process_id, candt_id, termination_index, site_index
+                        )
                         self._update_candidate_oer_metrics(candt_id)
                     elif job_type == 'OH_adsorption':
                         oh_batch_ready = \
@@ -739,7 +924,24 @@ class Job_handler():
                                 candt_id, termination_index, site_index
                             )
                         if oh_batch_ready:
+                            self._update_oh_batch_process_oer_metrics(
+                                candt_id, termination_index, site_index
+                            )
                             self._update_candidate_oer_metrics(candt_id)
+                        else:
+                            # NOTE:
+                            # Keep OH process rows unchanged until the
+                            # full OH batch is terminal. Partial updates
+                            # here mostly expose O-only metrics and can
+                            # be misleading for OH process tracking.
+
+                            # self._update_process_oer_metrics(
+                            #     process_id,
+                            #     candt_id,
+                            #     termination_index,
+                            #     site_index,
+                            # )
+                            pass
 
         else:
             r_pdf = self.rframe.processes.df.copy()
@@ -750,6 +952,7 @@ class Job_handler():
                 termination_index = pdf_row['termination_index']
                 site_index = pdf_row['site_index']
                 candt_id = pdf_row['candidate_id']
+                process_id = pdf_row['process_id']
 
                 if self.mode == 'MLIP_test':
                     try:
@@ -765,8 +968,13 @@ class Job_handler():
                     except Exception:
                         self.rframe.processes.df.at[idx, 'status'] \
                             = 'failed'
-                        updates[pdf_row['process_id']] = 'failed'
-                        if job_type == 'OH_adsorption':
+                        updates[process_id] = 'failed'
+                        if job_type == 'O_adsorption':
+                            self._update_process_oer_metrics(
+                                process_id, candt_id, termination_index, 
+                                site_index
+                            )
+                        elif job_type == 'OH_adsorption':
                             oh_batch_ready = \
                                 self._refresh_oh_batch_finalization_state(
                                     candt_id,
@@ -774,9 +982,27 @@ class Job_handler():
                                     site_index,
                                 )
                             if oh_batch_ready:
+                                self._update_oh_batch_process_oer_metrics(
+                                    candt_id, termination_index, 
+                                    site_index
+                                )
                                 self._update_candidate_oer_metrics(
                                     candt_id
                                 )
+                            else:
+                                # NOTE:
+                                # Keep OH process rows unchanged until
+                                # all OH jobs for this site are
+                                # terminal. Re-enable if per-process
+                                # partial snapshots are needed.
+
+                                # self._update_process_oer_metrics(
+                                #     process_id,
+                                #     candt_id,
+                                #     termination_index,
+                                #     site_index,
+                                # )
+                                pass
                         continue
 
                 else:
@@ -786,8 +1012,13 @@ class Job_handler():
                     except Exception:
                         self.rframe.processes.df.at[idx, 'status'] \
                             = 'failed'
-                        updates[pdf_row['process_id']] = 'failed'
-                        if job_type == 'OH_adsorption':
+                        updates[process_id] = 'failed'
+                        if job_type == 'O_adsorption':
+                            self._update_process_oer_metrics(
+                                process_id, candt_id, termination_index,
+                                site_index
+                            )
+                        elif job_type == 'OH_adsorption':
                             oh_batch_ready = \
                                 self._refresh_oh_batch_finalization_state(
                                     candt_id,
@@ -795,9 +1026,27 @@ class Job_handler():
                                     site_index,
                                 )
                             if oh_batch_ready:
+                                self._update_oh_batch_process_oer_metrics(
+                                    candt_id, termination_index, 
+                                    site_index
+                                )
                                 self._update_candidate_oer_metrics(
                                     candt_id
                                 )
+                            else:
+                                # NOTE:
+                                # Keep OH process rows unchanged until
+                                # all OH jobs for this site are
+                                # terminal. Re-enable if per-process
+                                # partial snapshots are needed.
+
+                                # self._update_process_oer_metrics(
+                                #     process_id,
+                                #     candt_id,
+                                #     termination_index,
+                                #     site_index,
+                                # )
+                                pass
                         continue
 
                 cand_row = self.rframe.candidates[candt_id]
@@ -853,26 +1102,68 @@ class Job_handler():
                 if unrecoverable_reason is not None:
                     self.rframe.processes.df.at[idx, 'status'] = \
                         "unrecoverable: " + unrecoverable_reason
-                    updates[pdf_row['process_id']] = 'unrecoverable'
-                    if job_type == 'OH_adsorption':
+                    updates[process_id] = 'unrecoverable'
+                    if job_type == 'O_adsorption':
+                        self._update_process_oer_metrics(
+                            process_id, candt_id, termination_index,
+                            site_index
+                        )
+                    elif job_type == 'OH_adsorption':
                         oh_batch_ready = \
                             self._refresh_oh_batch_finalization_state(
                                 candt_id, termination_index, site_index
                             )
                         if oh_batch_ready:
+                            self._update_oh_batch_process_oer_metrics(
+                                candt_id, termination_index, site_index
+                            )
                             self._update_candidate_oer_metrics(candt_id)
+                        else:
+                            # NOTE:
+                            # Keep OH process rows unchanged until the
+                            # full OH batch is terminal. Partial updates
+                            # here mostly expose O-only metrics and can
+                            # be misleading for OH process tracking.
+
+                            # self._update_process_oer_metrics(
+                            #     process_id,
+                            #     candt_id,
+                            #     termination_index,
+                            #     site_index,
+                            # )
+                            pass
                     continue
 
                 self.rframe.processes.df.at[idx, 'status'] = \
                     'completed'
-                updates[pdf_row['process_id']] = 'completed'
+                updates[process_id] = 'completed'
                 if job_type == 'O_adsorption':
+                    self._update_process_oer_metrics(
+                        process_id, candt_id, termination_index,
+                        site_index
+                    )
                     self._update_candidate_oer_metrics(candt_id)
                 elif job_type == 'OH_adsorption':
                     oh_batch_ready = self._refresh_oh_batch_finalization_state(
                         candt_id, termination_index, site_index
                     )
                     if oh_batch_ready:
+                        self._update_oh_batch_process_oer_metrics(
+                            candt_id, termination_index, site_index
+                        )
                         self._update_candidate_oer_metrics(candt_id)
+                    else:
+                        # NOTE:
+                        # Keep OH process rows unchanged until the full
+                        # OH batch is terminal. This avoids writing
+                        # partial OH snapshots to process rows.
+
+                        # self._update_process_oer_metrics(
+                        #     process_id,
+                        #     candt_id,
+                        #     termination_index,
+                        #     site_index,
+                        # )
+                        pass
 
         return updates

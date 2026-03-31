@@ -860,6 +860,11 @@ class Job_handler():
                     # (ignoring configuring as it is irrelevant)
                     if new_status == 'configuring':
                         new_status = 'pending'
+                    # Keep COMPLETING jobs in a running-like state
+                    # until they disappear from the queue and can be
+                    # post-processed.
+                    elif new_status == 'completing':
+                        new_status = 'running'
 
                     # set current status:
                     updates[row['process_id']] = new_status

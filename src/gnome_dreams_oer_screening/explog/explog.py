@@ -37,7 +37,7 @@ class Explog:
         rf.add_table("candidates", study_df, pk="candidate_id")
 
         process_df = pd.DataFrame({
-            "process_id": pd.Series(dtype=pd.StringDtype()),
+            "process_id": pd.Series(dtype=pd.Int64Dtype()),
             "candidate_id": pd.Series(dtype=pd.StringDtype()),
             "job_type": pd.Series(dtype=pd.StringDtype()),
             "slurmID": pd.Series(dtype=pd.StringDtype()),
@@ -101,7 +101,7 @@ class Explog:
         termination_index: int | None = None,
         site_index: int | None = None,
         note: str | None = None
-        ) -> str | list[str]:
+        ) -> int | list[int]:
         
         result =  self.job_handler.enter_process(candidate_id, 
             calculation_type, termination_index, site_index, note)
@@ -110,9 +110,18 @@ class Explog:
             pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
         return result
         
-    def submit_process(self, process_id: str,
+    def submit_process(self, process_id: int | str,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto']
         = 'auto') -> None:
+
+        if isinstance(process_id, str):
+            try:
+                process_id = int(process_id)
+            except ValueError:
+                raise ValueError(f"Process ID must be an integer or a "+
+                    "string that can be converted to an integer. Got " +
+                    f"{process_id}.")
+
         self.job_handler.submit_vasp_calculation(process_id, 
                                                  partition=partition)
         # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference

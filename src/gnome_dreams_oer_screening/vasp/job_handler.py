@@ -61,6 +61,15 @@ class Job_handler():
         if self.mode == "slurm_test":
             self.sleep_min = sleep_min
 
+    # NOTE (planned public pre-check API):
+    # Add non-mutating helpers:
+    #   can_enter_process(...)
+    #   can_submit_process(...)
+    # Each helper should return a structured validation result from the
+    # shared `vasp.job_validation` module. The mutating methods
+    # (`enter_process` / `submit_vasp_calculation`) should remain
+    # raise-based and call these helpers internally.
+
     def enter_process(
         self,
         candidate_id,
@@ -69,7 +78,7 @@ class Job_handler():
         termination_index: int | None = None,
         site_index: int | None = None,
         note: str | None = None
-        ) -> str | list[str]:
+        ) -> int | list[int]:
         """
         Register a new calculation process for a candidate.
 
@@ -96,7 +105,7 @@ class Job_handler():
                 Optional process note stored in `processNote`.
 
         Returns:
-            str | list[str]:
+            int | list[int]:
                 For non-OH jobs, the newly assigned process id.
                 For `OH_adsorption`, a list of process ids (one for each
                 OH initialization structure).
@@ -111,6 +120,18 @@ class Job_handler():
                 If `candidate_id` does not exist in the candidates
                 table.
         """
+
+        # NOTE (planned validation refactor):
+        # Replace the inline pre-checks below with:
+        #   result = self.can_enter_process(
+        #       candidate_id, job_type, termination_index, site_index
+        #   )
+        #   if not result.ok:
+        #       result.raise_for_error()
+        # Keep this method raise-based for backward compatibility, but
+        # route the policy checks through shared validators in
+        # `vasp.job_validation` so external orchestrators can run the
+        # same pre-checks without mutating state.
 
         # Get the candidates and processes rows from:
         cand_row = self.rframe.candidates[candidate_id]
@@ -263,7 +284,7 @@ class Job_handler():
 
         # --------------------------------------------------------------
 
-        def _add_single_process(single_note: str | None = None) -> str:
+        def _add_single_process(single_note: str | None = None) -> int:
             # Format the new process row:
             new_process_row = {
                 "job_type": job_type,
@@ -275,7 +296,7 @@ class Job_handler():
             }
 
             # Get total number of processes, and assign as id:
-            new_p_id = str(len(self.rframe.processes.df))  # new process id
+            new_p_id = len(self.rframe.processes.df)  # new process id
 
             # Test if new process id already exists (should not happen if
             # process ids are assigned correctly):
@@ -315,23 +336,30 @@ class Job_handler():
     
     def submit_vasp_calculation(
         self,
-        process_id: str,
+        process_id: int,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto'],
         # vasp_cmd: list = ["mpiexec", "vasp_std"],
         # max_errors: int = 20
         ) -> None:
-        
-        # Convert process_id to string if it is an integer:
-        if isinstance(process_id, int):
-            process_id = str(process_id)
-        # Test if process_id is now a string:
-        if not isinstance(process_id, str):
-            raise ValueError("process_id must be a string or an " \
-                "integer.")
+
+        # NOTE (planned validation refactor):
+        # Replace the inline submission checks below with:
+        #   result = self.can_submit_process(process_id)
+        #   if not result.ok:
+        #       result.raise_for_error()
+        # Then read candidate/study/job_type/indices from
+        # `result.context` to avoid duplicated lookups and to keep the
+        # same validation logic reusable outside Job_handler.
+
+        # Enforce integer process id:
+        if isinstance(process_id, np.integer):
+            process_id = int(process_id)
+        if not isinstance(process_id, int):
+            raise ValueError("process_id must be an integer.")
 
         # Get the process row for the candidate and process id:
         process_row = self.rframe.processes.df.loc[
-            (self.rframe.processes.df['process_id'] == process_id)
+            self.rframe.processes.df['process_id'] == process_id
         ]
         # Test if process row is empty:
         if process_row.empty:
@@ -717,8 +745,11 @@ class Job_handler():
         Missing metrics (or missing site row) are stored as NaN.
         """
         
-        # Ensure string process id for indexing:
-        process_id = str(process_id)
+        # Ensure integer process id for indexing:
+        if isinstance(process_id, np.integer):
+            process_id = int(process_id)
+        if not isinstance(process_id, int):
+            raise ValueError("process_id must be an integer.")
 
         # Iterate over process cols:
         process_cols = set(self.rframe.processes.df.columns.tolist())
@@ -887,7 +918,7 @@ class Job_handler():
 
                     candt_id = pdf_row['candidate_id']
                     cand_row = self.rframe.candidates[candt_id]
-                    process_id = pdf_row['process_id']
+                    process_id = int(pdf_row['process_id'])
                     study = cand_row.df['study_obj'].values[0]
                     
                     job_type = pdf_row['job_type']
@@ -957,7 +988,7 @@ class Job_handler():
                 termination_index = pdf_row['termination_index']
                 site_index = pdf_row['site_index']
                 candt_id = pdf_row['candidate_id']
-                process_id = pdf_row['process_id']
+                process_id = int(pdf_row['process_id'])
 
                 if self.mode == 'MLIP_test':
                     try:

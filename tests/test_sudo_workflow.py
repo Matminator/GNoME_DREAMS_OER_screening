@@ -106,8 +106,8 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
 
     l_keys = list(updates_dict.keys())
     assert len(l_keys) == 1
-    assert l_keys[0] == str(0)
-    assert updates_dict['0'] == 'completed'
+    assert l_keys[0] == 0
+    assert updates_dict[0] == 'completed'
 
     # Args:
     cant_id = cand_id

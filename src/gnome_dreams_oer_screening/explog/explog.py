@@ -21,7 +21,22 @@ class Explog:
                       "production"] = "production",
         prefix_vasp_dirs: bool = True,
         sleep_min = 2,
+        reject_if_failed_exists: bool = False,
+        require_relaxed_o_for_oh: bool = False,
         ):
+        """
+        Initialize the experiment log and attached job handler.
+
+        Args:
+            reject_if_failed_exists:
+                Default duplicate policy used for process-entry
+                validation. If True, matching failed processes also
+                block re-entry unless overridden per call.
+            require_relaxed_o_for_oh:
+                Default OH policy used for process-entry validation. If
+                True, OH jobs require an accepted relaxed O structure
+                unless overridden per call.
+        """
         # Setup of relational frame, with tables for candidates and 
         # processes (both of which are needed for the Job_handler etc.)
         rf = RelationalFrame(root="candidates")
@@ -74,9 +89,14 @@ class Explog:
             vasp_calculation_dir = Path(vasp_calculation_dir)
         self.relational_frame = rf
         self.vasp_calculation_dir = vasp_calculation_dir
-        self.job_handler = Job_handler(rf, vasp_calculation_dir,
-            mode=mode, prefix_vasp_dirs_with_prefix=prefix_vasp_dirs,
-            sleep_min=sleep_min)
+        self.job_handler = Job_handler(
+            rf, 
+            vasp_calculation_dir,
+            mode = mode, 
+            prefix_vasp_dirs_with_prefix = prefix_vasp_dirs,
+            sleep_min = sleep_min,
+            reject_if_failed_exists = reject_if_failed_exists,
+            require_relaxed_o_for_oh = require_relaxed_o_for_oh)
         
     def add_candidate(self, 
                       candidate_id: str, 
@@ -103,16 +123,24 @@ class Explog:
             "surface_relaxation", "O_adsorption", "OH_adsorption"],
         termination_index: int | None = None,
         site_index: int | None = None,
-        reject_if_failed_exists: bool = False,
-        require_relaxed_o_for_oh: bool = False,
+        reject_if_failed_exists: bool | None = None,
+        require_relaxed_o_for_oh: bool | None = None,
     ) -> ValidationResult:
         """
         Non-mutating pre-check for adding a process to the log.
 
         This wraps `validate_enter_process` and returns a structured
         `ValidationResult` without creating or updating any process
-        rows.
+        rows. If optional policy arguments are `None`, handler defaults
+        from `Explog.init(...)` are used.
         """
+        if reject_if_failed_exists is None:
+            reject_if_failed_exists = \
+                self.job_handler.default_reject_if_failed_exists
+        if require_relaxed_o_for_oh is None:
+            require_relaxed_o_for_oh = \
+                self.job_handler.default_require_relaxed_o_for_oh
+
         return validate_enter_process(
             self.relational_frame,
             candidate_id=candidate_id,
@@ -129,11 +157,26 @@ class Explog:
             "surface_relaxation", "O_adsorption", 'OH_adsorption'],
         termination_index: int | None = None,
         site_index: int | None = None,
-        note: str | None = None
+        note: str | None = None,
+        reject_if_failed_exists: bool | None = None,
+        require_relaxed_o_for_oh: bool | None = None,
         ) -> int | list[int]:
+        """
+        Add one process (or an OH batch) to the processes table.
+
+        If `reject_if_failed_exists` or `require_relaxed_o_for_oh` is
+        `None`, the handler defaults from `Explog.init(...)` are used.
+        """
+        result =  self.job_handler.enter_process(
+            candidate_id, 
+            calculation_type, 
+            termination_index, 
+            site_index, 
+            note,
+            reject_if_failed_exists = reject_if_failed_exists,
+            require_relaxed_o_for_oh = require_relaxed_o_for_oh
+            )
         
-        result =  self.job_handler.enter_process(candidate_id, 
-            calculation_type, termination_index, site_index, note)
         # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
         with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
             pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)

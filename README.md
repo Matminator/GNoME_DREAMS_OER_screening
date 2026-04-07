@@ -1,5 +1,26 @@
 # GNoME_DREAMS_OER_screening
 
+## v0.5.2 Update Notes
+
+This release streamlines process-entry validation configuration and
+clarifies policy ownership between `Explog` and `Job_handler`.
+
+- `Job_handler` now owns default process-entry policy settings:
+  `reject_if_failed_exists` and `require_relaxed_o_for_oh`.
+- `Explog.init(...)` exposes the same defaults and forwards them to
+  `Job_handler`.
+- `Explog.add_process(...)` and `Explog.can_add_process(...)` now
+  support per-call overrides using `None` as "use handler default".
+- `Job_handler.enter_process(...)` now resolves effective policy from
+  defaults + overrides and applies `validate_enter_process(...)`
+  directly as the shared pre-check.
+- Legacy inline `enter_process` sanity checks are deprecated and kept
+  as commented reference; validator-based checks are the active path.
+- Removed the older OH-specific duplicate policy flag and consolidated
+  duplicate handling through the shared validator path.
+- Updated and expanded tests for validator behavior and job-handler
+  integration.
+
 ## v0.5.0 Update Notes
 
 This release adds structured, reusable process validation for OER

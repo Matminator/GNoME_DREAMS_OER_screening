@@ -33,6 +33,9 @@ class DummyAdStudy:
     def get_OH_adsorbed_atoms(self):
         return self._oh_adsorbed_atoms
 
+    def set_oh_batch_finalized(self, _value: bool):
+        return None
+
 
 class DummySurfaceStudy:
     def __init__(self, base_surface_relaxed=None, adsite_studies=None):
@@ -737,6 +740,102 @@ def test_explog_can_add_process_returns_candidate_not_found(
     )
     assert result.ok is False
     assert result.code == "candidate_not_found"
+
+
+# Test enter_process fails cleanly when surface studies are missing:
+def test_add_process_rejects_surface_when_surface_studies_none(
+    explog: Explog,
+):
+    candidate_id = "cand_enter_surface_none"
+    explog.add_candidate(candidate_id, DummyStudySurfaceStudiesNone())
+
+    with pytest.raises(ValueError, match="No initialized surface studies"):
+        explog.add_process(
+            candidate_id=candidate_id,
+            calculation_type="surface_relaxation",
+            termination_index=0,
+        )
+
+
+# Test enter_process fails cleanly when adsite studies dict is None:
+def test_add_process_rejects_adsorption_when_adsite_studies_none(
+    explog: Explog,
+):
+    candidate_id = "cand_enter_adsite_none"
+    surface = DummySurfaceStudyAdsitesNone()
+    explog.add_candidate(
+        candidate_id,
+        DummyStudy(surface_studies={0: surface}),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="No initialized adsorption-site studies",
+    ):
+        explog.add_process(
+            candidate_id=candidate_id,
+            calculation_type="O_adsorption",
+            termination_index=0,
+            site_index=3,
+        )
+
+
+def test_add_process_allows_oh_reentry_after_failed_by_default(
+    explog: Explog,
+):
+    candidate_id = "cand_oh_retry_default"
+    study = _make_adsorption_study(relaxed_O=object())
+    explog.add_candidate(candidate_id, study)
+    _add_process_row(
+        explog=explog,
+        process_id=0,
+        candidate_id=candidate_id,
+        job_type="OH_adsorption",
+        status="failed",
+        termination_index=0,
+        site_index=3,
+    )
+
+    process_ids = explog.add_process(
+        candidate_id=candidate_id,
+        calculation_type="OH_adsorption",
+        termination_index=0,
+        site_index=3,
+    )
+    assert isinstance(process_ids, list)
+    assert len(process_ids) == 1
+
+
+def test_add_process_rejects_oh_reentry_after_failed_in_strict_mode(
+    local_explog_dir: Path,
+):
+    explog = Explog()
+    explog.init(
+        vasp_calculation_dir=local_explog_dir,
+        mode="test",
+        prefix_vasp_dirs=False,
+        reject_if_failed_exists=True,
+    )
+    candidate_id = "cand_oh_retry_strict"
+    study = _make_adsorption_study(relaxed_O=object())
+    explog.add_candidate(candidate_id, study)
+    _add_process_row(
+        explog=explog,
+        process_id=0,
+        candidate_id=candidate_id,
+        job_type="OH_adsorption",
+        status="failed",
+        termination_index=0,
+        site_index=3,
+    )
+
+    with pytest.raises(RuntimeError, match="OH_adsorption"):
+        explog.add_process(
+            candidate_id=candidate_id,
+            calculation_type="OH_adsorption",
+            termination_index=0,
+            site_index=3,
+        )
 # **********************************************************************
 
 

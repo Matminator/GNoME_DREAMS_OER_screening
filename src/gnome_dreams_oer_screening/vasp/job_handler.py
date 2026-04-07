@@ -11,6 +11,8 @@ import pandas as pd
 
 from gnome_dreams_oer_screening.vasp.vasp_calculation import (
     calculational_setup, read_vasp_results, clean_up_vasp_directory)
+from gnome_dreams_oer_screening.vasp.job_validation import (
+    validate_enter_process)
 from gnome_dreams_oer_screening.explog.relational_frame import (
     RelationalFrame)
 from gnome_dreams_oer_screening import get_my_jobs_status
@@ -34,7 +36,9 @@ class Job_handler():
         mode: Literal["test", "slurm_test", 'MLIP_test',
                       "production_test", "production"],
         prefix_vasp_dirs_with_prefix: bool = True,
-        sleep_min: int = 2
+        sleep_min: int = 2,
+        reject_if_failed_exists: bool = False,
+        require_relaxed_o_for_oh: bool = False,
         ) -> None:
 
         # Create the directory if it doesn't exist
@@ -60,15 +64,10 @@ class Job_handler():
 
         if self.mode == "slurm_test":
             self.sleep_min = sleep_min
-
-    # NOTE (planned public pre-check API):
-    # Add non-mutating helpers:
-    #   can_enter_process(...)
-    #   can_submit_process(...)
-    # Each helper should return a structured validation result from the
-    # shared `vasp.job_validation` module. The mutating methods
-    # (`enter_process` / `submit_vasp_calculation`) should remain
-    # raise-based and call these helpers internally.
+        self.default_reject_if_failed_exists = \
+            reject_if_failed_exists
+        self.default_require_relaxed_o_for_oh = \
+            require_relaxed_o_for_oh
 
     def enter_process(
         self,
@@ -77,7 +76,9 @@ class Job_handler():
             "surface_relaxation", "O_adsorption", 'OH_adsorption'],
         termination_index: int | None = None,
         site_index: int | None = None,
-        note: str | None = None
+        note: str | None = None,
+        reject_if_failed_exists: bool | None = None,
+        require_relaxed_o_for_oh: bool | None = None,
         ) -> int | list[int]:
         """
         Register a new calculation process for a candidate.
@@ -89,8 +90,6 @@ class Job_handler():
         The method rejects creating a new process when a non-failed
         process already exists for the same candidate and the same
         `(job_type, termination_index, site_index)` combination.
-        For `OH_adsorption`, it also rejects creating a new batch if
-        OH jobs for the same site have already been submitted once.
 
         Args:
             candidate_id:
@@ -103,6 +102,14 @@ class Job_handler():
                 Adsorption-site index for adsorption jobs.
             note:
                 Optional process note stored in `processNote`.
+            reject_if_failed_exists:
+                If True, duplicate matching processes are rejected even
+                when their status is `failed`. If `None`, the handler
+                default from initialization is used.
+            require_relaxed_o_for_oh:
+                If True, `OH_adsorption` is rejected unless a relaxed O
+                structure has already been accepted for the site. If
+                `None`, the handler default from initialization is used.
 
         Returns:
             int | list[int]:
@@ -120,169 +127,165 @@ class Job_handler():
                 If `candidate_id` does not exist in the candidates
                 table.
         """
+        if reject_if_failed_exists is None:
+            reject_if_failed_exists = \
+                self.default_reject_if_failed_exists
+        if require_relaxed_o_for_oh is None:
+            require_relaxed_o_for_oh = \
+                self.default_require_relaxed_o_for_oh
 
-        # NOTE (planned validation refactor):
-        # Replace the inline pre-checks below with:
-        #   result = self.can_enter_process(
-        #       candidate_id, job_type, termination_index, site_index
-        #   )
-        #   if not result.ok:
-        #       result.raise_for_error()
-        # Keep this method raise-based for backward compatibility, but
-        # route the policy checks through shared validators in
-        # `vasp.job_validation` so external orchestrators can run the
-        # same pre-checks without mutating state.
-
-        # Get the candidates and processes rows from:
-        cand_row = self.rframe.candidates[candidate_id]
-        cand_processes = cand_row.processes
-
-        # --- Test if calculation is appropriate -----------------------
-        pdf = cand_processes.df.copy()
-
-        # Base filters
-        mask = (
-            (pdf["status"] != "failed") &
-            (pdf["job_type"] == job_type)
+        # Shared pre-checks from validator (non-mutating). Keep this
+        # method raise-based by converting failed results to exceptions.
+        validation_result = validate_enter_process(
+            self.rframe,
+            candidate_id=candidate_id,
+            job_type=job_type,
+            termination_index=termination_index,
+            site_index=site_index,
+            reject_if_failed_exists=reject_if_failed_exists,
+            require_relaxed_o_for_oh=require_relaxed_o_for_oh,
         )
+        if not validation_result.ok:
+            validation_result.raise_for_error()
 
-        # Termination filter
-        if termination_index is None:
-            termination_mask = pdf["termination_index"].isna()
-        else:
-            termination_mask = pdf["termination_index"] \
-                == termination_index
+        # DEPRECATED SANITY CHECKS START
+        # Get the candidates and processes rows from:
+        # cand_row = self.rframe.candidates[candidate_id]
+        # cand_processes = cand_row.processes
+        #
+        # # --- Test if calculation is appropriate -----------------------
+        # pdf = cand_processes.df.copy()
+        #
+        # # Base filters
+        # mask = (
+        #     (pdf["status"] != "failed") &
+        #     (pdf["job_type"] == job_type)
+        # )
+        #
+        # # Termination filter
+        # if termination_index is None:
+        #     termination_mask = pdf["termination_index"].isna()
+        # else:
+        #     termination_mask = pdf["termination_index"] \
+        #         == termination_index
+        #
+        # # Site filter
+        # if site_index is None:
+        #     site_mask = pdf["site_index"].isna()
+        # else:
+        #     site_mask = pdf["site_index"] == site_index
+        #
+        # matching_pdf = pdf[termination_mask & site_mask]
+        # pdf = matching_pdf[
+        #     (matching_pdf["status"] != "failed")
+        #     & (matching_pdf["job_type"] == job_type)
+        # ]
+        #
+        # # If non-finished or completed calculation exists: non-valied:
+        # non_valid_calc = not pdf.empty
+        # if non_valid_calc:
+        #     states = pdf["status"].values
+        #     message = f"Candidate {candidate_id} has a non-failed " \
+        #     f"calculation of type {job_type} with status in " \
+        #     f"{states}. This calculation is therefore invalid."
+        #     raise RuntimeError(message)
+        # # --------------------------------------------------------------
+        #
+        # # --- Sanity checks against study object state -----------------
+        # study_obj = cand_row.df["study_obj"].values[0]
+        #
+        # if job_type == "bulk_relaxation":
+        #     # Test that termination and site indices are not provided:
+        #     if termination_index is not None or site_index is not None:
+        #         raise ValueError(
+        #             "bulk_relaxation does not use termination_index "
+        #             "or site_index."
+        #         )
+        #     # Test if the relaxed bulk already is set for the study:
+        #     if study_obj.get_bulk_atoms() is not None:
+        #         raise RuntimeError(
+        #             f"Candidate {candidate_id} already has a relaxed "
+        #             "bulk structure set. A new bulk_relaxation process "
+        #             "must not be created."
+        #         )
+        #
+        # elif job_type == "surface_relaxation":
+        #     # Test termination index is provided:
+        #     if termination_index is None:
+        #         raise ValueError(
+        #             "surface_relaxation requires termination_index."
+        #         )
+        #     # Test site index is not provided:
+        #     if site_index is not None:
+        #         raise ValueError(
+        #             "surface_relaxation does not use site_index."
+        #         )
+        #
+        #     # Test if surface study is initialized for the study:
+        #     surface_studies = study_obj.get_surface_studies()
+        #     if termination_index not in surface_studies:
+        #         raise ValueError(
+        #             "No initialized surface study exists for "
+        #             f"termination_index={termination_index}."
+        #         )
+        #
+        #     # Test if relaxed surface already is set for the study:
+        #     surface_study = surface_studies[termination_index]
+        #     if surface_study.base_surface_relaxed is not None:
+        #         raise RuntimeError(
+        #             "A relaxed surface is already set for "
+        #             f"termination_index={termination_index}. "
+        #             "A new surface_relaxation process must not be "
+        #             "created."
+        #         )
+        #
+        # elif job_type in ["O_adsorption", "OH_adsorption"]:
+        #
+        #     # Test that termination index is provided:
+        #     if termination_index is None:
+        #         raise ValueError(
+        #             f"{job_type} requires termination_index."
+        #         )
+        #
+        #     # Test that site index is provided:
+        #     if site_index is None:
+        #         raise ValueError(
+        #             f"{job_type} requires site_index."
+        #         )
+        #
+        #     # Test if surface study is initialized for the study:
+        #     surface_studies = study_obj.get_surface_studies()
+        #     if termination_index not in surface_studies:
+        #         raise ValueError(
+        #             "No initialized surface study exists for "
+        #             f"termination_index={termination_index}."
+        #         )
+        #     surface_study = surface_studies[termination_index]
+        #
+        #     # Test if ad-site study is initialized for the study:
+        #     adsite_studies = surface_study.\
+        #         get_adsorption_site_studies_dict()
+        #     if site_index not in adsite_studies:
+        #         raise ValueError(
+        #             "No initialized adsorption-site study exists for "
+        #             f"site_index={site_index} on "
+        #             f"termination_index={termination_index}."
+        #         )
+        #     ad_study = adsite_studies[site_index]
+        #
+        #     if job_type == "O_adsorption" and \
+        #             ad_study.relaxed_O_atoms is not None:
+        #         raise RuntimeError(
+        #             "A relaxed O structure has already been accepted "
+        #             f"for site_index={site_index} on "
+        #             f"termination_index={termination_index}. "
+        #             "A new O_adsorption process must not be created."
+        #         )
+        #
+        # # --------------------------------------------------------------
+        # DEPRECATED SANITY CHECKS END
 
-        # Site filter
-        if site_index is None:
-            site_mask = pdf["site_index"].isna()
-        else:
-            site_mask = pdf["site_index"] == site_index
-
-        matching_pdf = pdf[termination_mask & site_mask]
-        pdf = matching_pdf[
-            (matching_pdf["status"] != "failed")
-            & (matching_pdf["job_type"] == job_type)
-        ]
-
-        # If non-finished or completed calculation exists: non-valied:
-        non_valid_calc = not pdf.empty 
-        if non_valid_calc:
-            states = pdf["status"].values
-            message = f"Candidate {candidate_id} has a non-failed " \
-            f"calculation of type {job_type} with status in " \
-            f"{states}. This calculation is therefore invalid."
-            raise RuntimeError(message)
-        # --------------------------------------------------------------
-
-        # --- Sanity checks against study object state -----------------
-        study_obj = cand_row.df["study_obj"].values[0]
-
-        if job_type == "bulk_relaxation":
-            # Test that termination and site indices are not provided:
-            if termination_index is not None or site_index is not None:
-                raise ValueError(
-                    "bulk_relaxation does not use termination_index "
-                    "or site_index."
-                )
-            # Test if the relaxed bulk already is set for the study:
-            if study_obj.get_bulk_atoms() is not None:
-                raise RuntimeError(
-                    f"Candidate {candidate_id} already has a relaxed "
-                    "bulk structure set. A new bulk_relaxation process "
-                    "must not be created."
-                )
-
-        elif job_type == "surface_relaxation":
-            # Test termination index is provided:
-            if termination_index is None:
-                raise ValueError(
-                    "surface_relaxation requires termination_index."
-                )
-            # Test site index is not provided:
-            if site_index is not None:
-                raise ValueError(
-                    "surface_relaxation does not use site_index."
-                )
-
-            # Test if surface study is initialized for the study:
-            surface_studies = study_obj.get_surface_studies()
-            if termination_index not in surface_studies:
-                raise ValueError(
-                    "No initialized surface study exists for "
-                    f"termination_index={termination_index}."
-                )
-
-            # Test if relaxed surface already is set for the study:
-            surface_study = surface_studies[termination_index]
-            if surface_study.base_surface_relaxed is not None:
-                raise RuntimeError(
-                    "A relaxed surface is already set for "
-                    f"termination_index={termination_index}. "
-                    "A new surface_relaxation process must not be "
-                    "created."
-                )
-
-        elif job_type in ["O_adsorption", "OH_adsorption"]:
-
-            # Test that termination index is provided:
-            if termination_index is None:
-                raise ValueError(
-                    f"{job_type} requires termination_index."
-                )
-            
-            # Test that site index is provided:
-            if site_index is None:
-                raise ValueError(
-                    f"{job_type} requires site_index."
-                )
-
-            # Test if surface study is initialized for the study:
-            surface_studies = study_obj.get_surface_studies()
-            if termination_index not in surface_studies:
-                raise ValueError(
-                    "No initialized surface study exists for "
-                    f"termination_index={termination_index}."
-                )
-            surface_study = surface_studies[termination_index]
-
-            # Test if ad-site study is initialized for the study:
-            adsite_studies = surface_study.\
-                get_adsorption_site_studies_dict()
-            if site_index not in adsite_studies:
-                raise ValueError(
-                    "No initialized adsorption-site study exists for "
-                    f"site_index={site_index} on "
-                    f"termination_index={termination_index}."
-                )
-            ad_study = adsite_studies[site_index]
-
-            if job_type == "O_adsorption" and \
-                    ad_study.relaxed_O_atoms is not None:
-                raise RuntimeError(
-                    "A relaxed O structure has already been accepted "
-                    f"for site_index={site_index} on "
-                    f"termination_index={termination_index}. "
-                    "A new O_adsorption process must not be created."
-                )
-            
-            if job_type == "OH_adsorption":
-                submitted_oh_rows = matching_pdf[
-                    (matching_pdf["job_type"] == "OH_adsorption")
-                    & (matching_pdf["status"] != "un-submitted")
-                ]
-                if not submitted_oh_rows.empty:
-                    states = submitted_oh_rows["status"].tolist()
-                    raise RuntimeError(
-                        "OH adsorption jobs have already been "
-                        f"submitted for site_index={site_index} on "
-                        f"termination_index={termination_index}. "
-                        "A new OH_adsorption batch must not be "
-                        f"created. Existing statuses: {states}"
-                    )
-
-
-        # --------------------------------------------------------------
+        ad_study = validation_result.context.get("ad_study")
 
         def _add_single_process(single_note: str | None = None) -> int:
             # Format the new process row:

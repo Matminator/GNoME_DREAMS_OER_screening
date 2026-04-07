@@ -415,7 +415,11 @@ def test_enter_process_rejects_second_oh_batch_after_first_was_submitted(
     atoms = read(cif_path, format="cif")
 
     explog = Explog()
-    explog.init(local_explog_dir, mode="test")
+    explog.init(
+        local_explog_dir,
+        mode="test",
+        reject_if_failed_exists=True,
+    )
 
     candidate_id = "cand_no_second_oh_batch"
     study = OER_catalyst_study(
@@ -467,7 +471,7 @@ def test_enter_process_rejects_second_oh_batch_after_first_was_submitted(
     pdf = explog.relational_frame.processes.df
     pdf.loc[pdf["process_id"].isin(process_ids), "status"] = "failed"
 
-    with pytest.raises(RuntimeError, match="already been submitted"):
+    with pytest.raises(RuntimeError, match="type OH_adsorption"):
         explog.add_process(
             candidate_id=candidate_id,
             calculation_type="OH_adsorption",

@@ -87,9 +87,9 @@ class Job_handler():
         table with status set to `'un-submitted'`, a generated
         `process_id`, and a unique VASP working directory path.
 
-        The method rejects creating a new process when a non-failed
-        process already exists for the same candidate and the same
-        `(job_type, termination_index, site_index)` combination.
+        Validation is delegated to `validate_enter_process(...)` before
+        creating process rows. Duplicate policy is controlled by
+        `reject_if_failed_exists` (or the handler default when `None`).
 
         Args:
             candidate_id:
@@ -120,9 +120,12 @@ class Job_handler():
         Raises:
             RuntimeError:
                 If the generated process id already exists, if a
-                non-failed matching process already exists for the
-                candidate, or if an OH batch has already been
-                submitted for the same site.
+                duplicate matching process is disallowed by policy, or
+                if study state disallows the requested process.
+            ValueError:
+                If required indices are missing/invalid for the
+                requested `job_type`, or required study objects are not
+                initialized.
             KeyError:
                 If `candidate_id` does not exist in the candidates
                 table.
@@ -286,6 +289,15 @@ class Job_handler():
         # DEPRECATED SANITY CHECKS END
 
         ad_study = validation_result.context.get("ad_study")
+        if job_type in ["O_adsorption", "OH_adsorption"] and \
+                ad_study is None:
+            raise RuntimeError(
+                "Internal error: validation contract violation. "
+                "Missing ad_study in validate_enter_process(...) "
+                "context for adsorption job_type="
+                f"{job_type}. This indicates an internal "
+                "implementation bug."
+            )
 
         def _add_single_process(single_note: str | None = None) -> int:
             # Format the new process row:

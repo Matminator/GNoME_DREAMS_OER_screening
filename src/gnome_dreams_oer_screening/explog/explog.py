@@ -9,6 +9,8 @@ import pickle
 from .relational_frame import RelationalFrame
 from gnome_dreams_oer_screening.oer.oer_study import OER_catalyst_study
 from gnome_dreams_oer_screening.vasp.job_handler import Job_handler
+from gnome_dreams_oer_screening.vasp.job_validation import (
+    ValidationResult, validate_enter_process)
 
 
 class Explog:
@@ -93,6 +95,33 @@ class Explog:
                              "study_obj": study_obj}
         self.relational_frame.candidates.add_row(new_candidate_row, 
                                                  allow_update=False)
+
+    def can_add_process(
+        self,
+        candidate_id: str,
+        calculation_type: Literal["bulk_relaxation",
+            "surface_relaxation", "O_adsorption", "OH_adsorption"],
+        termination_index: int | None = None,
+        site_index: int | None = None,
+        reject_if_failed_exists: bool = False,
+        require_relaxed_o_for_oh: bool = False,
+    ) -> ValidationResult:
+        """
+        Non-mutating pre-check for adding a process to the log.
+
+        This wraps `validate_enter_process` and returns a structured
+        `ValidationResult` without creating or updating any process
+        rows.
+        """
+        return validate_enter_process(
+            self.relational_frame,
+            candidate_id=candidate_id,
+            job_type=calculation_type,
+            termination_index=termination_index,
+            site_index=site_index,
+            reject_if_failed_exists=reject_if_failed_exists,
+            require_relaxed_o_for_oh=require_relaxed_o_for_oh,
+        )
 
     def add_process(self, 
         candidate_id: str, 

@@ -107,7 +107,26 @@ class TestEnumerateMagneticStructures:
     """
     All tests patch MagneticStructureEnumerator so that enumlib is not
     required to run these tests in CI.
+
+    SpacegroupAnalyzer is also patched in every test so that the
+    primitive-cell conversion inside enumerate_magnetic_structures is a
+    no-op: the mock returns the input structure unchanged, keeping
+    n_input equal to the atom count of the test structure.
     """
+
+    @staticmethod
+    def _patch_sga(structure):
+        """
+        Patch SpacegroupAnalyzer so get_primitive_standard_structure()
+        returns the input structure as-is (no atom-count change).
+        """
+        mock_sga = MagicMock()
+        mock_sga.get_primitive_standard_structure.return_value = structure
+        return patch(
+            "gnome_dreams_oer_screening.vasp.magnetic_enumeration"
+            ".SpacegroupAnalyzer",
+            return_value=mock_sga,
+        )
 
     def _patch_enumerator(self, configs: list[tuple]):
         """
@@ -133,7 +152,7 @@ class TestEnumerateMagneticStructures:
     def test_returns_nm_fallback_when_enumerator_raises(self):
         """If MagneticStructureEnumerator raises, return one NM entry."""
         structure = _make_structure(2)
-        with patch(
+        with self._patch_sga(structure), patch(
             "gnome_dreams_oer_screening.vasp.magnetic_enumeration"
             ".MagneticStructureEnumerator",
             side_effect=RuntimeError("enumlib not found"),
@@ -147,7 +166,7 @@ class TestEnumerateMagneticStructures:
     def test_returns_nm_fallback_when_enumerator_returns_empty(self):
         """If the enumerator returns zero candidates, return one NM entry."""
         structure = _make_structure(2)
-        with self._patch_enumerator([]):
+        with self._patch_sga(structure), self._patch_enumerator([]):
             result = enumerate_magnetic_structures(structure, n_max=4)
 
         assert len(result) == 1
@@ -162,7 +181,6 @@ class TestEnumerateMagneticStructures:
         """
         structure = _make_structure(2)
 
-        # Patch enumerator manually so we can mix atom counts
         supercell_struct = _make_mag_structure([2.0, 2.0, -2.0, -2.0])
         same_cell_struct = _make_mag_structure([2.0, -2.0])
 
@@ -170,7 +188,7 @@ class TestEnumerateMagneticStructures:
         mock_enum.ordered_structures = [supercell_struct, same_cell_struct]
         mock_enum.ordered_structure_origins = ["AFM_super", "AFM_same"]
 
-        with patch(
+        with self._patch_sga(structure), patch(
             "gnome_dreams_oer_screening.vasp.magnetic_enumeration"
             ".MagneticStructureEnumerator",
             return_value=mock_enum,
@@ -189,7 +207,7 @@ class TestEnumerateMagneticStructures:
         mock_enum.ordered_structures = [supercell]
         mock_enum.ordered_structure_origins = ["AFM_super"]
 
-        with patch(
+        with self._patch_sga(structure), patch(
             "gnome_dreams_oer_screening.vasp.magnetic_enumeration"
             ".MagneticStructureEnumerator",
             return_value=mock_enum,
@@ -204,14 +222,13 @@ class TestEnumerateMagneticStructures:
     def test_n_max_caps_number_of_returned_configs(self):
         """Only the first n_max candidates (after sorting) are returned."""
         structure = _make_structure(2)
-        # Provide 4 same-cell configs; request only 2
         configs = [
             ([2.0, 2.0], "FM"),
             ([2.0, -2.0], "AFM_1"),
             ([-2.0, 2.0], "AFM_2"),
             ([0.0, 0.0], "NM"),
         ]
-        with self._patch_enumerator(configs):
+        with self._patch_sga(structure), self._patch_enumerator(configs):
             result = enumerate_magnetic_structures(structure, n_max=2)
 
         assert len(result) == 2
@@ -219,7 +236,7 @@ class TestEnumerateMagneticStructures:
     def test_n_max_1_returns_single_config(self):
         configs = [([2.0, 2.0], "FM"), ([2.0, -2.0], "AFM")]
         structure = _make_structure(2)
-        with self._patch_enumerator(configs):
+        with self._patch_sga(structure), self._patch_enumerator(configs):
             result = enumerate_magnetic_structures(structure, n_max=1)
         assert len(result) == 1
 
@@ -228,7 +245,7 @@ class TestEnumerateMagneticStructures:
     def test_returned_dicts_have_required_keys(self):
         structure = _make_structure(2)
         configs = [([2.0, 2.0], "FM")]
-        with self._patch_enumerator(configs):
+        with self._patch_sga(structure), self._patch_enumerator(configs):
             result = enumerate_magnetic_structures(structure)
 
         assert set(result[0].keys()) == {"structure", "magmom", "ordering"}
@@ -236,7 +253,7 @@ class TestEnumerateMagneticStructures:
     def test_magmom_length_matches_atom_count(self):
         structure = _make_structure(2)
         configs = [([2.0, -2.0], "AFM")]
-        with self._patch_enumerator(configs):
+        with self._patch_sga(structure), self._patch_enumerator(configs):
             result = enumerate_magnetic_structures(structure)
 
         assert len(result[0]["magmom"]) == 2

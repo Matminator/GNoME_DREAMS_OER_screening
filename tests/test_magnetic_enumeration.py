@@ -87,5 +87,9 @@ def test_fe_conventional_cell_returns_multiple_orderings():
         nz = [m for m in magmom if abs(m) > 0.1]
         return len(nz) > 0 and any(m > 0 for m in nz) and any(m < 0 for m in nz)
 
-    assert any(is_fm(r["magmom"]) for r in results), "No FM config found"
+    # FM must appear within the first 2 results — it should never be buried
+    # at the bottom since it is always physically relevant
+    assert any(is_fm(r["magmom"]) for r in results[:2]), (
+        f"FM not in first 2 results: {[r['magmom'] for r in results]}"
+    )
     assert any(is_afm(r["magmom"]) for r in results), "No AFM config found"

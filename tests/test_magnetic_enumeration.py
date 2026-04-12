@@ -62,14 +62,30 @@ def test_fe_primitive_cell_returns_fm_as_first_config():
 
     results = enumerate_magnetic_structures(struct, n_max=4)
 
-    first = results[0]
-    nonzero = [m for m in first["magmom"] if abs(m) > 0.1]
-    assert len(nonzero) > 0, f"First config is NM, ordering={first['ordering']}"
-    assert all(m > 0 for m in nonzero) or all(m < 0 for m in nonzero), (
-        f"First config is not FM: magmom={first['magmom']}"
+    # Results must be a list with one dict entry:
+    assert isinstance(results, list), f"Expected list output, got {type(results)}"
+    assert len(results) == 1, f"Expected 1 result for 1-atom cell, got {len(results)}"
+    assert isinstance(results[0], dict), f"Expected dict entry, got {type(results[0])}"
+
+    config_dict = results[0]
+    magmoms = config_dict["magmom"]
+    assert len(magmoms) == 1, f"Expected magmom list of length 1, got {len(magmoms)}"
+
+    # Check that the single magmom is close to 5 (Fe's default value in pymatgen)
+    mag = magmoms[0]
+    assert abs(mag) == pytest.approx(5.0, abs=0.1), f"Expected magmom ~5 for Fe, got {mag}"
+
+    # Ordering label must be 'fm'
+    assert config_dict["ordering"] == "fm", (
+        f"Expected ordering='fm', got '{config_dict['ordering']}'"
     )
 
-
+    # Returned structure must have the same atom count as the input (no cell expansion)
+    assert len(config_dict["structure"]) == len(struct), (
+        f"Expected 1-atom structure, got {len(config_dict['structure'])} atoms"
+    )
+    
+    
 @needs_enumlib
 def test_fe_conventional_cell_returns_multiple_orderings():
     """

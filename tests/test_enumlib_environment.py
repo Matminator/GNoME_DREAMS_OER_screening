@@ -84,16 +84,21 @@ def test_enumerator_runs_without_error_on_fe_bcc():
 
 
 @needs_enumlib
-def test_enumerator_returns_same_cell_orderings_for_fe_bcc():
-    """All returned orderings must have the same atom count as the input."""
+def test_enumerator_reduces_conventional_cell_to_primitive():
+    """
+    MagneticStructureEnumerator internally converts to primitive, so a
+    2-atom conventional BCC cell input returns 1-atom primitive structures.
+    This documents the known behaviour that enumerate_magnetic_structures
+    works around by pre-converting to primitive before calling the enumerator.
+    """
     lat = Lattice.cubic(2.87)
     struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
     enum = MagneticStructureEnumerator(struct, automatic=True)
-    n_input = len(struct)
-    for s in enum.ordered_structures:
-        assert len(s) == n_input or len(s) > n_input, (
-            "Unexpected atom count in enumerated structure"
-        )
+    # Enumerator reduces to primitive — results have 1 atom, not 2
+    assert any(len(s) < len(struct) for s in enum.ordered_structures), (
+        "Expected enumerator to return primitive (smaller) structures for "
+        "a conventional BCC cell input"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +120,10 @@ def test_enumerate_magnetic_structures_fm_is_first_for_fe_bcc():
     For Fe BCC the FM ordering has the highest symmetry and must be
     returned at index 0 after the symmetry-based sort.
     FM = all magmoms same sign and nonzero.
+
+    Uses the conventional 2-atom BCC cell — enumerate_magnetic_structures
+    pre-converts to primitive (1 atom) before calling the enumerator,
+    so the filter correctly keeps the 1-atom FM result.
     """
     lat = Lattice.cubic(2.87)
     struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
@@ -122,7 +131,10 @@ def test_enumerate_magnetic_structures_fm_is_first_for_fe_bcc():
 
     first_magmom = results[0]["magmom"]
     nonzero = [m for m in first_magmom if abs(m) > 0.1]
-    assert len(nonzero) > 0, "First config is NM — expected FM"
+    assert len(nonzero) > 0, (
+        f"First config is NM — expected FM. All results: "
+        f"{[r['ordering'] for r in results]}"
+    )
     assert all(m > 0 for m in nonzero) or all(m < 0 for m in nonzero), (
         f"First config is not FM: magmom={first_magmom}"
     )

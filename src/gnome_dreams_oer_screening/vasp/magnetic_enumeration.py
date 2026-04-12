@@ -51,7 +51,13 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
         {"structure": Structure, "magmom": list[float], "ordering": str}
 
     Ordering and filtering rules:
-    - Orderings that require a supercell (atom count != input) are discarded.
+    - The input is reduced to its primitive cell before enumeration.
+      This prevents the enumerator from returning sub-cell structures
+      (pymatgen internally converts to primitive, so passing a conventional
+      cell causes all results to have fewer atoms than the input, which
+      the supercell filter would then discard — leaving only NM fallback).
+    - Orderings that require a supercell (atom count > primitive cell) are
+      discarded so that only same-cell orderings are returned.
     - Remaining candidates are sorted by number of symmetry operations with
       spin as site coloring (Horton et al. 2019): FM always lands first
       (highest symmetry), followed by the most symmetric AFM, etc.
@@ -64,11 +70,13 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     to be symmetry-sorted in current pymatgen — the sort is applied here
     explicitly to replicate the paper's enumeration index definition.
     """
-    n_input = len(structure)
+    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+    primitive = SpacegroupAnalyzer(structure).get_primitive_standard_structure()
+    n_input = len(primitive)
     candidates: list[dict] = []
 
     try:
-        enumerator = MagneticStructureEnumerator(structure, automatic=True)
+        enumerator = MagneticStructureEnumerator(primitive, automatic=True)
         for mag_struct, origin in zip(
             enumerator.ordered_structures, enumerator.ordered_structure_origins
         ):
@@ -86,7 +94,7 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     if not candidates:
         # Non-magnetic material or enumlib unavailable — one NM fallback job
         return [{
-            "structure": structure,
+            "structure": primitive,
             "magmom": [0.0] * n_input,
             "ordering": "NM",
         }]

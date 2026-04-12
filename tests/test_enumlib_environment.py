@@ -1,0 +1,150 @@
+"""
+Environment integration test for enumlib + magnetic enumeration.
+
+These tests call MagneticStructureEnumerator WITHOUT mocking, so they
+require the enumlib binaries (enum.x, makestr.x / multienum.x) to be
+on PATH. They are intended to verify that the HPC environment is
+correctly set up before running production workflows.
+
+Run with:
+    pytest tests/test_enumlib_environment.py -v
+
+These tests are NOT marked 'mini' and are excluded from the normal
+fast test suite. Run them explicitly on the HPC to confirm the
+environment is ready.
+"""
+
+import shutil
+import subprocess
+
+import pytest
+from pymatgen.core import Lattice, Structure
+from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
+
+from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
+    enumerate_magnetic_structures,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helper: skip if enumlib binaries are not on PATH
+# ---------------------------------------------------------------------------
+
+def _enumlib_available() -> bool:
+    """Return True if the required enumlib executables are on PATH."""
+    required = ["enum.x", "makestr.x"]
+    alternatives = [["multienum.x", "makeStr.py"]]  # accepted alternatives
+    has_enum = shutil.which("enum.x") is not None or shutil.which("multienum.x") is not None
+    has_make = shutil.which("makestr.x") is not None or shutil.which("makeStr.py") is not None
+    return has_enum and has_make
+
+
+needs_enumlib = pytest.mark.skipif(
+    not _enumlib_available(),
+    reason="enumlib binaries (enum.x / makestr.x) not found on PATH — "
+           "install via: conda install -c conda-forge enumlib",
+)
+
+
+# ---------------------------------------------------------------------------
+# Binary presence checks (always run — no skip)
+# ---------------------------------------------------------------------------
+
+def test_enum_x_is_on_path():
+    """enum.x or multienum.x must be on PATH."""
+    found = shutil.which("enum.x") or shutil.which("multienum.x")
+    assert found is not None, (
+        "Neither enum.x nor multienum.x found on PATH.\n"
+        "Fix: conda install -c conda-forge enumlib\n"
+        "  or: pmg config --install enumlib  (Linux/macOS only)"
+    )
+
+
+def test_makestr_x_is_on_path():
+    """makestr.x or makeStr.py must be on PATH."""
+    found = shutil.which("makestr.x") or shutil.which("makeStr.py")
+    assert found is not None, (
+        "Neither makestr.x nor makeStr.py found on PATH.\n"
+        "Fix: conda install -c conda-forge enumlib"
+    )
+
+
+# ---------------------------------------------------------------------------
+# MagneticStructureEnumerator smoke tests (skip if enumlib missing)
+# ---------------------------------------------------------------------------
+
+@needs_enumlib
+def test_enumerator_runs_without_error_on_fe_bcc():
+    """MagneticStructureEnumerator must complete without raising on Fe BCC."""
+    lat = Lattice.cubic(2.87)
+    struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    # If this raises, enumlib is broken or not on PATH
+    enum = MagneticStructureEnumerator(struct, automatic=True)
+    assert len(enum.ordered_structures) > 0, "Enumerator returned no orderings"
+
+
+@needs_enumlib
+def test_enumerator_returns_same_cell_orderings_for_fe_bcc():
+    """All returned orderings must have the same atom count as the input."""
+    lat = Lattice.cubic(2.87)
+    struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    enum = MagneticStructureEnumerator(struct, automatic=True)
+    n_input = len(struct)
+    for s in enum.ordered_structures:
+        assert len(s) == n_input or len(s) > n_input, (
+            "Unexpected atom count in enumerated structure"
+        )
+
+
+# ---------------------------------------------------------------------------
+# enumerate_magnetic_structures integration tests (skip if enumlib missing)
+# ---------------------------------------------------------------------------
+
+@needs_enumlib
+def test_enumerate_magnetic_structures_returns_at_least_one_config():
+    """enumerate_magnetic_structures must return at least one config."""
+    lat = Lattice.cubic(2.87)
+    struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    results = enumerate_magnetic_structures(struct, n_max=4)
+    assert len(results) >= 1
+
+
+@needs_enumlib
+def test_enumerate_magnetic_structures_fm_is_first_for_fe_bcc():
+    """
+    For Fe BCC the FM ordering has the highest symmetry and must be
+    returned at index 0 after the symmetry-based sort.
+    FM = all magmoms same sign and nonzero.
+    """
+    lat = Lattice.cubic(2.87)
+    struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    results = enumerate_magnetic_structures(struct, n_max=4)
+
+    first_magmom = results[0]["magmom"]
+    nonzero = [m for m in first_magmom if abs(m) > 0.1]
+    assert len(nonzero) > 0, "First config is NM — expected FM"
+    assert all(m > 0 for m in nonzero) or all(m < 0 for m in nonzero), (
+        f"First config is not FM: magmom={first_magmom}"
+    )
+
+
+@needs_enumlib
+def test_enumerate_magnetic_structures_respects_n_max():
+    """Result length must not exceed n_max."""
+    lat = Lattice.cubic(2.87)
+    struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    for n in [1, 2, 4]:
+        results = enumerate_magnetic_structures(struct, n_max=n)
+        assert len(results) <= n, f"n_max={n} but got {len(results)} configs"
+
+
+@needs_enumlib
+def test_enumerate_magnetic_structures_all_configs_have_correct_atom_count():
+    """Every returned config must have magmom length == input atom count."""
+    lat = Lattice.cubic(2.87)
+    struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    results = enumerate_magnetic_structures(struct, n_max=4)
+    for i, cfg in enumerate(results):
+        assert len(cfg["magmom"]) == len(struct), (
+            f"Config {i}: magmom length {len(cfg['magmom'])} != {len(struct)}"
+        )

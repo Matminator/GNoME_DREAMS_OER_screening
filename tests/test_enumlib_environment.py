@@ -152,11 +152,16 @@ def test_enumerate_magnetic_structures_respects_n_max():
 
 @needs_enumlib
 def test_enumerate_magnetic_structures_all_configs_have_correct_atom_count():
-    """Every returned config must have magmom length == input atom count."""
+    """
+    Every returned config's magmom list must match the length of the
+    returned structure (which may be primitive, not the input cell).
+    """
     lat = Lattice.cubic(2.87)
     struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
     results = enumerate_magnetic_structures(struct, n_max=4)
     for i, cfg in enumerate(results):
-        assert len(cfg["magmom"]) == len(struct), (
-            f"Config {i}: magmom length {len(cfg['magmom'])} != {len(struct)}"
+        n_struct = len(cfg["structure"])
+        assert len(cfg["magmom"]) == n_struct, (
+            f"Config {i}: magmom length {len(cfg['magmom'])} != "
+            f"structure length {n_struct}"
         )

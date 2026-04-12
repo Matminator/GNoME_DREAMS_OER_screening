@@ -82,7 +82,17 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
         ):
             if len(mag_struct) != n_input:
                 continue  # discard supercell orderings
-            magmoms = [site.properties.get("magmom", 0) for site in mag_struct.sites]
+            magmoms = []
+            for site in mag_struct.sites:
+                m = site.properties.get("magmom", None)
+                if m is not None:
+                    magmoms.append(float(m))
+                elif hasattr(site.specie, "spin") and site.specie.spin is not None:
+                    # MagneticStructureEnumerator encodes spin in the species
+                    # (e.g. Fe,spin=5) rather than in site properties
+                    magmoms.append(float(site.specie.spin))
+                else:
+                    magmoms.append(0.0)
             candidates.append({
                 "structure": mag_struct,
                 "magmom": magmoms,

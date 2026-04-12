@@ -120,18 +120,20 @@ def test_fe_conventional_cell_returns_multiple_orderings():
 
 
 @needs_enumlib
-def test_cu_non_magnetic_returns_nm_fallback():
+def test_si_non_magnetic_returns_nm_fallback():
     """
-    Cu FCC primitive cell — a well-known non-magnetic metal.
-    MagneticStructureEnumerator raises ValueError for materials with no
-    magnetic species. enumerate_magnetic_structures catches this and returns
-    a single NM fallback entry with all magmoms = 0.0.
+    Si diamond structure — a well-known non-magnetic semiconductor.
+    Si is NOT in pymatgen's magnetic elements list, so MagneticStructureEnumerator
+    raises ValueError("Not detected as magnetic"). enumerate_magnetic_structures
+    catches this and returns a single NM fallback entry with magmoms = 0.6.
+
+    Note: Cu is in pymatgen's magnetic elements list (Cu2+ can be magnetic),
+    so it does NOT trigger the ValueError path. Si is used here instead.
     """
-    a = 3.615
-    lat = Lattice([[0, a/2, a/2],
-                   [a/2, 0, a/2],
-                   [a/2, a/2, 0]])
-    struct = Structure(lat, ["Cu"], [[0, 0, 0]])
+    a = 5.43
+    lat = Lattice.cubic(a)
+    # Diamond cubic: 2-atom primitive cell
+    struct = Structure(lat, ["Si", "Si"], [[0, 0, 0], [0.25, 0.25, 0.25]])
 
     results = enumerate_magnetic_structures(struct, n_max=4)
 
@@ -240,11 +242,12 @@ def test_gnome_Fe2Ir2O12Rh2_returns_fm_and_afm():
 
 @needs_enumlib
 @_needs_traj
-def test_gnome_Ag3BiCoIr3O14_returns_fm_and_afm():
+def test_gnome_Ag3BiCoIr3O14_returns_fm():
     """
-    Ag3BiCoIr3O14 — 22-atom structure (traj index 6) with Co.
-    Co is a magnetic element. Both FM and AFM orderings are expected.
-    FM must appear first (highest symmetry).
+    Ag3BiCoIr3O14 — 22-atom structure (traj index 6) with a single Co atom.
+    Co is the only magnetic species in the cell. With only one magnetic site,
+    AFM is physically impossible — the enumerator can only produce FM.
+    We assert FM is found and is first.
     """
     structure = _load_gnome_structure(traj_index=6)
     results = enumerate_magnetic_structures(structure, n_max=4)
@@ -254,10 +257,7 @@ def test_gnome_Ag3BiCoIr3O14_returns_fm_and_afm():
     assert _has_fm(results), (
         f"FM not found: {[r['magmom'] for r in results]}"
     )
-    assert _has_afm(results), (
-        f"AFM not found: {[r['magmom'] for r in results]}"
-    )
-    # FM must be first
+    # FM must be first (only ordering possible with 1 magnetic site)
     fm_magmoms = results[0]["magmom"]
     nz = [m for m in fm_magmoms if abs(m) > 0.1]
     assert all(m > 0 for m in nz) or all(m < 0 for m in nz), (

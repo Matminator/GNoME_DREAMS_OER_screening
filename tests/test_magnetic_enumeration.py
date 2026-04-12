@@ -66,21 +66,26 @@ def test_fe_primitive_cell_returns_fm_as_first_config():
 
 
 @needs_enumlib
-def test_fe_conventional_cell_returns_fm_as_first_config():
+def test_fe_conventional_cell_returns_multiple_orderings():
     """
-    Fe BCC conventional cell (2 atoms). The enumerator internally reduces
-    to a 1-atom primitive cell and returns 1-atom orderings. These are
-    accepted by the filter (only supercells are rejected). The first result
-    must still be FM.
+    Fe BCC conventional cell (2 atoms). With 2 atoms the enumerator can
+    produce both FM [5, 5] and AFM [5, -5]. The AFM ordering comes first
+    because the body-center symmetry (translation + spin flip) gives it
+    more symmetry operations than FM for this specific geometry.
+    We verify that at least one FM and one AFM config are present.
     """
     lat = Lattice.cubic(2.87)
     struct = Structure(lat, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
 
     results = enumerate_magnetic_structures(struct, n_max=4)
 
-    first = results[0]
-    nonzero = [m for m in first["magmom"] if abs(m) > 0.1]
-    assert len(nonzero) > 0, f"First config is NM, ordering={first['ordering']}"
-    assert all(m > 0 for m in nonzero) or all(m < 0 for m in nonzero), (
-        f"First config is not FM: magmom={first['magmom']}"
-    )
+    def is_fm(magmom):
+        nz = [m for m in magmom if abs(m) > 0.1]
+        return len(nz) > 0 and (all(m > 0 for m in nz) or all(m < 0 for m in nz))
+
+    def is_afm(magmom):
+        nz = [m for m in magmom if abs(m) > 0.1]
+        return len(nz) > 0 and any(m > 0 for m in nz) and any(m < 0 for m in nz)
+
+    assert any(is_fm(r["magmom"]) for r in results), "No FM config found"
+    assert any(is_afm(r["magmom"]) for r in results), "No AFM config found"

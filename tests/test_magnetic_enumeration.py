@@ -25,6 +25,11 @@ from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
 )
 
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Not all sites have property wyckoff:UserWarning",
+    "ignore:Elements in POSCAR would be overwritten:UserWarning",
+)
+
 
 def _enumlib_available() -> bool:
     """Return True if the required enumlib executables are on PATH."""

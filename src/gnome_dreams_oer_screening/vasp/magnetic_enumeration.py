@@ -1,6 +1,5 @@
 import spglib
 from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 
 def _count_magnetic_symmetry_ops(mag_structure) -> int:
@@ -43,12 +42,8 @@ def _count_magnetic_symmetry_ops(mag_structure) -> int:
         return 1
 
 
-def _get_primitive(structure):
-    """Convert structure to its primitive standard cell."""
-    return SpacegroupAnalyzer(structure).get_primitive_standard_structure()
-
-
-def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
+def enumerate_magnetic_structures(structure, n_max: int = 4
+                                  ) -> list[dict]:
     """
     Enumerate distinct collinear magnetic orderings for a structure and
     return the most symmetrically prioritised ones up to n_max.
@@ -57,13 +52,11 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
         {"structure": Structure, "magmom": list[float], "ordering": str}
 
     Ordering and filtering rules:
-    - The input is reduced to its primitive cell before enumeration.
-      This prevents the enumerator from returning sub-cell structures
-      (pymatgen internally converts to primitive, so passing a conventional
-      cell causes all results to have fewer atoms than the input, which
-      the supercell filter would then discard — leaving only NM fallback).
-    - Orderings that require a supercell (atom count > primitive cell) are
-      discarded so that only same-cell orderings are returned.
+    - The input structure is used as-is (no cell conversion).
+      Input structures from the GNoME database are already primitive cells.
+    - Orderings that require a supercell (atom count > input) are discarded.
+      Same-size and smaller (primitive) structures are both accepted.
+      The winner is selected by energy per atom in finalize_mag_bulk_batch.
     - Remaining candidates are sorted by number of symmetry operations with
       spin as site coloring (Horton et al. 2019): FM always lands first
       (highest symmetry), followed by the most symmetric AFM, etc.
@@ -76,41 +69,39 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     to be symmetry-sorted in current pymatgen — the sort is applied here
     explicitly to replicate the paper's enumeration index definition.
     """
-    primitive = _get_primitive(structure)
-    n_input = len(primitive)
+    n_input = len(structure)
     candidates: list[dict] = []
 
     try:
-        enumerator = MagneticStructureEnumerator(primitive, automatic=True)
+        enumerator = MagneticStructureEnumerator(structure, automatic=True)
+    except ValueError as e:
+        if "Not detected as magnetic" in str(e):
+            enumerator = None # non-magnetic elements -> FM fallback
+        else:
+            raise e
+
+    if enumerator is not None:
         for mag_struct, origin in zip(
-            enumerator.ordered_structures, enumerator.ordered_structure_origins
+            enumerator.ordered_structures, 
+            enumerator.ordered_structure_origins
         ):
-            if len(mag_struct) != n_input:
+            if len(mag_struct) > n_input:
                 continue  # discard supercell orderings
-            magmoms = []
-            for site in mag_struct.sites:
-                m = site.properties.get("magmom", None)
-                if m is not None:
-                    magmoms.append(float(m))
-                elif hasattr(site.specie, "spin") and site.specie.spin is not None:
-                    # MagneticStructureEnumerator encodes spin in the species
-                    # (e.g. Fe,spin=5) rather than in site properties
-                    magmoms.append(float(site.specie.spin))
-                else:
-                    magmoms.append(0.0)
+            magmoms = [
+                float(site.specie.spin) if site.specie.spin is not None else 0.0
+                for site in mag_struct.sites
+            ]
             candidates.append({
                 "structure": mag_struct,
                 "magmom": magmoms,
                 "ordering": str(origin),
             })
-    except Exception:
-        candidates = []
 
     if not candidates:
-        # Non-magnetic material or enumlib unavailable — one NM fallback job
+        # Non-magnetic material — one NM fallback job
         return [{
-            "structure": primitive,
-            "magmom": [0.0] * n_input,
+            "structure": structure,
+            "magmom": [0.6] * n_input,
             "ordering": "NM",
         }]
 

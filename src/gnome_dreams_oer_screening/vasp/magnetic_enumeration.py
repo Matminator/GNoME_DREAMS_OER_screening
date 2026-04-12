@@ -1,5 +1,6 @@
 import spglib
 from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 
 def _count_magnetic_symmetry_ops(mag_structure) -> int:
@@ -42,6 +43,11 @@ def _count_magnetic_symmetry_ops(mag_structure) -> int:
         return 1
 
 
+def _get_primitive(structure):
+    """Convert structure to its primitive standard cell."""
+    return SpacegroupAnalyzer(structure).get_primitive_standard_structure()
+
+
 def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     """
     Enumerate distinct collinear magnetic orderings for a structure and
@@ -70,8 +76,7 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     to be symmetry-sorted in current pymatgen — the sort is applied here
     explicitly to replicate the paper's enumeration index definition.
     """
-    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-    primitive = SpacegroupAnalyzer(structure).get_primitive_standard_structure()
+    primitive = _get_primitive(structure)
     n_input = len(primitive)
     candidates: list[dict] = []
 

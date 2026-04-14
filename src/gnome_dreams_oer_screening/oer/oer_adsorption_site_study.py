@@ -2,6 +2,7 @@ import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii
 from ase.geometry import find_mic
+from typing import TYPE_CHECKING
 
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
     are_all_atoms_connected,
@@ -65,6 +66,7 @@ class OER_adsorption_site_study:
         
         self.energies_dict = energies_dict
         self.relaxed_O_atoms = None
+        self._relaxed_O_magmom: list[float] | None = None
         self.OH_init_atoms = None
         self.relaxed_OH_atoms = None
         self.accepted_relaxed_OH_pairs = []

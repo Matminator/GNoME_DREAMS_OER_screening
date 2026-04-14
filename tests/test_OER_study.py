@@ -11,66 +11,93 @@ import gnome_dreams_oer_screening.oer.oer_study as oer_study_module
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
     StructureConsistencyError,
 )
-    
-# --- Initilization tests of the OER_catalyst_study class: -------------
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_study(symbols='Fe'):
+    """Return a (study, atoms) pair with the relaxed bulk NOT yet set.
+    Always produces a single-atom cell — symbols should be one element name."""
+    atoms = Atoms(symbols, positions=[[0, 0, 0]], cell=[4, 4, 4], pbc=True)
+    study = OER_catalyst_study(
+        atoms,
+        H2_gas_free_energy=-2.0,
+        H2O_gas_free_energy=-4.0,
+    )
+    return study, atoms
+
+
+def _finalize(study, atoms, energy=-1.0, magmom=None):
+    """Store a single candidate and finalize — convenience for fixtures."""
+    if magmom is None:
+        magmom = [0.0] * len(atoms)
+    study.store_mag_bulk_candidate(0, atoms.copy(), energy, magmom)
+    study.finalize_mag_bulk_batch()
+
+
+# ---------------------------------------------------------------------------
+# Initialisation tests
+# ---------------------------------------------------------------------------
+
 @pytest.mark.mini
 def test_setup_1():
-    atoms = Atoms('Fe', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
-    # Now needed for eqivalence, since tag is set in the initialization:
-    for atom in atoms:
-        atom.tag = 0
-
-    oer_study =OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True
+    """Bulk is None until finalized via the magnetic workflow."""
+    atoms = Atoms('Fe', positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
     )
-
-    assert oer_study.get_bulk_atoms() ==  atoms
-    assert oer_study.get_bulk_structure() == \
-        AseAtomsAdaptor.get_structure(atoms)
+    assert oer_study.get_bulk_atoms() is None
     energies = oer_study.get_gas_and_energy_corrections()
     assert energies['H2_gas_free_energy'] == -2
     assert energies['H2O_gas_free_energy'] == -4
+
 
 @pytest.mark.mini
 def test_setup_2():
-    atoms = Atoms('Ti', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
-    # Now needed for eqivalence, since tag is set in the initialization:
+    """Setting the relaxed bulk via the magnetic workflow produces the correct result."""
+    atoms = Atoms('Ti', positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
     for atom in atoms:
         atom.tag = 0
 
-    oer_study =OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
     )
 
     atoms_to_relax = oer_study.get_init_atoms()
-    oer_study.set_relaxed_structure(atoms_to_relax)
+    oer_study.store_mag_bulk_candidate(0, atoms_to_relax, -1.0, [0.0])
+    oer_study.finalize_mag_bulk_batch()
 
-    assert oer_study.get_bulk_atoms() ==  atoms
-    assert oer_study.get_bulk_structure() == \
-        AseAtomsAdaptor.get_structure(atoms)
+    assert oer_study.get_bulk_atoms() == atoms
+    # bulk_structure carries site_properties["magmom"] after finalization, so
+    # compare element formula and atom count rather than full structure equality:
+    bulk_structure = oer_study.get_bulk_structure()
+    assert bulk_structure.formula == AseAtomsAdaptor.get_structure(atoms).formula
+    assert len(bulk_structure) == len(atoms)
     energies = oer_study.get_gas_and_energy_corrections()
     assert energies['H2_gas_free_energy'] == -2
     assert energies['H2O_gas_free_energy'] == -4
 
+
 @pytest.mark.mini
 def test_error_apon_setting_relaxed_structure():
+    """Wrong-element candidate raises StructureConsistencyError at store time."""
+    atoms_1 = Atoms('Ti', positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
+    atoms_2 = Atoms('Fe', positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
 
-    atoms_1 = Atoms('Ti', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
-    atoms_2 = Atoms('Fe', positions=[[0, 0, 0]], cell=[2,2,2], pbc=True)
-
-    oer_study =OER_catalyst_study(
-        atoms_1, H2_gas_free_energy = -2, H2O_gas_free_energy = -4
+    oer_study = OER_catalyst_study(
+        atoms_1, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
     )
 
-    assert oer_study.get_init_atoms() ==  atoms_1    
-    with pytest.raises(ValueError):
-        oer_study.set_relaxed_structure(atoms_2)
+    assert oer_study.get_init_atoms() == atoms_1
+    with pytest.raises(StructureConsistencyError):
+        oer_study.store_mag_bulk_candidate(0, atoms_2, -1.0, [0.0])
 
 
 @pytest.mark.mini
 def test_set_relaxed_structure_raises_structure_consistency_error():
+    """Reordered atoms raise StructureConsistencyError (different symbol order) at store time."""
     atoms = Atoms(
         "TiO",
         positions=[[0, 0, 0], [1, 0, 0]],
@@ -78,48 +105,62 @@ def test_set_relaxed_structure_raises_structure_consistency_error():
         pbc=True,
     )
     oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
     )
 
     reordered_atoms = oer_study.get_init_atoms()[[1, 0]]
+    with pytest.raises(StructureConsistencyError, match="different symbols"):
+        oer_study.store_mag_bulk_candidate(0, reordered_atoms, -1.0, [0.0, 0.0])
 
-    with pytest.raises(
-        StructureConsistencyError, match="different symbols"
-    ):
-        oer_study.set_relaxed_structure(reordered_atoms)
-# --- End of initilization tests of the OER_catalyst_study class: ------
 
-# --- TEMP TITEL... 
-@pytest.fixture(scope="module")
-def TiO2_r_bulk():
-    dir_path = pathlib.Path(__file__).parent
-    TiO2_r_path = dir_path / '../notebooks/TiO2_rutile.cif'
-    atoms = read(TiO2_r_path.resolve(), format='cif')
-    oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
-    if atoms is None:
-        pytest.fail("Slab generation failed")
-    return atoms, oer_study
+# ---------------------------------------------------------------------------
+# TiO2 fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def TiO2_r_bulk():
     dir_path = pathlib.Path(__file__).parent
     TiO2_r_path = dir_path / '../notebooks/TiO2_rutile.cif'
     atoms = read(TiO2_r_path.resolve(), format='cif')
-    oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
     if atoms is None:
-        pytest.fail("Slab generation failed")
+        pytest.fail("Could not read TiO2 CIF")
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
+    )
+    _finalize(oer_study, oer_study.get_init_atoms())
     return atoms, oer_study
 
-# Testing that the correct bulk 'bulk-custom-coord' property is set:
+
+@pytest.fixture(scope="module")
+def TiO2_r_surfaces_predicted_O_coordination(TiO2_r_bulk):
+    atoms, _ = TiO2_r_bulk
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
+    )
+    _finalize(oer_study, oer_study.get_init_atoms())
+    oer_study.predict_most_likely_surfaces(method='O-coordination')
+    return oer_study
+
+
+@pytest.fixture(scope="module")
+def TiO2_r_surfaces_predicted_all_coordination(TiO2_r_bulk):
+    atoms, _ = TiO2_r_bulk
+    oer_study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
+    )
+    _finalize(oer_study, oer_study.get_init_atoms())
+    oer_study.predict_most_likely_surfaces(method='all')
+    return oer_study
+
+
+# ---------------------------------------------------------------------------
+# Bulk coordination test
+# ---------------------------------------------------------------------------
+
 @pytest.mark.mini
 def test__set_bulk_coordination(TiO2_r_bulk):
-    atoms, oer_study = TiO2_r_bulk
-    m = 'all'
-    oer_study._set_bulk_coordination(method=m)
+    _, oer_study = TiO2_r_bulk
+    oer_study._set_bulk_coordination(method='all')
 
     bulk_structure = oer_study.get_bulk_structure()
     for site in bulk_structure.sites:
@@ -130,33 +171,17 @@ def test__set_bulk_coordination(TiO2_r_bulk):
         else:
             raise ValueError("Unexpected element in structure")
 
-@pytest.fixture(scope="module")
-def TiO2_r_surfaces_predicted_O_coordination(TiO2_r_bulk):
-    atoms, oer_study_not_used = TiO2_r_bulk
 
-    oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
-
-    atoms_to_relax = oer_study.get_init_atoms()
-    oer_study.set_relaxed_structure(atoms_to_relax)
-    oer_study.predict_most_likely_surfaces(method = 'O-coordination')
-    return oer_study
-
-def test_error_apon_resetting_relaxed_structure(
-        TiO2_r_surfaces_predicted_O_coordination):
-    oer_study = TiO2_r_surfaces_predicted_O_coordination
-
-    atoms_to_relax = oer_study.get_init_atoms()
-    with pytest.raises(RuntimeError):
-        oer_study.set_relaxed_structure(atoms_to_relax)
+# ---------------------------------------------------------------------------
+# Surface score tests
+# ---------------------------------------------------------------------------
 
 def test_TiO2_r_110_surface_score_calculation_O_coordination(
         TiO2_r_surfaces_predicted_O_coordination):
     oer_study = TiO2_r_surfaces_predicted_O_coordination
 
     df = oer_study.get_termination_rankings()
-    row = df[df['Miller indices'] == (1,1,0)]
+    row = df[df['Miller indices'] == (1, 1, 0)]
     termination_index = row['Termination index'].values[0]
     score = row['Score'].values[0]
     slab = oer_study.terminations[termination_index]
@@ -165,33 +190,17 @@ def test_TiO2_r_110_surface_score_calculation_O_coordination(
     cell = slab_atoms.get_cell()
     A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
 
-    # Ti: 1: -1, (O: 1: -1, but ignored in this method)
-    expected_reduction = -1
-    expected_score = expected_reduction / A_surface
+    expected_score = -1 / A_surface  # Ti: 1 undercoordinated; O ignored
+    assert abs(score - expected_score) < 1e-6, \
+        f"Expected {expected_score}, got {score}"
 
-    score_diff = abs(score - expected_score)
-    assert score_diff < 1e-6, f"Expected score: {expected_score}, but" \
-        f" got {score}"
-    
-@pytest.fixture(scope="module")
-def TiO2_r_surfaces_predicted_all_coordination(TiO2_r_bulk):
-    atoms, oer_study_not_used = TiO2_r_bulk
-
-    oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
-
-    atoms_to_relax = oer_study.get_init_atoms()
-    oer_study.set_relaxed_structure(atoms_to_relax)
-    oer_study.predict_most_likely_surfaces(method = 'all')
-    return oer_study
 
 def test_TiO2_r_110_surface_score_calculation_all_coordination(
         TiO2_r_surfaces_predicted_all_coordination):
     oer_study = TiO2_r_surfaces_predicted_all_coordination
 
     df = oer_study.get_termination_rankings()
-    row = df[df['Miller indices'] == (1,1,0)]
+    row = df[df['Miller indices'] == (1, 1, 0)]
     termination_index = row['Termination index'].values[0]
     score = row['Score'].values[0]
     slab = oer_study.terminations[termination_index]
@@ -200,29 +209,150 @@ def test_TiO2_r_110_surface_score_calculation_all_coordination(
     cell = slab_atoms.get_cell()
     A_surface = np.linalg.norm(np.cross(cell[0], cell[1]))
 
-    # Ti: 1: -1, O: 1: -1
-    expected_reduction = -1 - 1
-    expected_score = expected_reduction / A_surface
+    expected_score = (-1 - 1) / A_surface  # Ti: -1, O: -1
+    assert abs(score - expected_score) < 1e-6, \
+        f"Expected {expected_score}, got {score}"
 
-    score_diff = abs(score - expected_score)
-    assert score_diff < 1e-6, f"Expected score: {expected_score}, but" \
-        f" got {score}"
 
-# --- Testing timeout and assoriated flag in _build_surfaces: ----------
+# ---------------------------------------------------------------------------
+# Second finalize raises (replaces old "reset after surfaces" test)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_error_on_second_finalize():
+    """Second call to finalize_mag_bulk_batch must raise RuntimeError."""
+    study, atoms = _make_study()
+    study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, [0.0])
+    study.finalize_mag_bulk_batch()
+
+    study.store_mag_bulk_candidate(1, atoms.copy(), -2.0, [0.0])
+    with pytest.raises(RuntimeError):
+        study.finalize_mag_bulk_batch()
+
+
+# ---------------------------------------------------------------------------
+# Timeout test
+# ---------------------------------------------------------------------------
+
 @pytest.mark.mini
 def test_build_surfaces_timeout_returns_empty_list(monkeypatch):
-    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
-    study = OER_catalyst_study(
-        atoms,
-        H2_gas_free_energy=-2.0,
-        H2O_gas_free_energy=-4.0,
-        use_init_as_relaxed_bulk=True,
-    )
+    study, atoms = _make_study()
+    _finalize(study, atoms)
 
     time_values = iter([0.0, 2.0])
-    monkeypatch.setattr(oer_study_module.time, "time", 
-                        lambda: next(time_values))
+    monkeypatch.setattr(oer_study_module.time, "time", lambda: next(time_values))
 
     slabs = study._build_surfaces((1, 0, 0), timeout=1)
     assert slabs == []
-# --- End of testing timeout and assoriated flag in _build_surfaces ----
+
+
+# ---------------------------------------------------------------------------
+# Magnetic workflow — initial state
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_mag_bulk_initial_state():
+    study, _ = _make_study()
+    assert study.is_mag_bulk_batch_finalized() is False
+    assert study.get_bulk_magmom() is None
+    assert study.get_bulk_atoms() is None
+
+
+# ---------------------------------------------------------------------------
+# store_mag_bulk_candidate
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_store_mag_bulk_candidate():
+    study, atoms = _make_study()
+    study.store_mag_bulk_candidate(0, atoms.copy(), -2.5, [2.0])
+    assert 0 in study._mag_bulk_candidates
+    _, stored_energy, stored_magmom = study._mag_bulk_candidates[0]
+    assert stored_energy == -2.5
+    assert stored_magmom == [2.0]
+
+
+@pytest.mark.mini
+def test_store_mag_bulk_candidate_wrong_magmom_length_raises():
+    """magmom length mismatch is caught at store time."""
+    atoms = Atoms('FeO', positions=[[0, 0, 0], [1, 0, 0]], cell=[4, 4, 4], pbc=True)
+    study = OER_catalyst_study(
+        atoms, H2_gas_free_energy=-2.0, H2O_gas_free_energy=-4.0,
+    )
+    with pytest.raises(ValueError):
+        study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, [2.0])  # len 1 != 2
+
+
+# ---------------------------------------------------------------------------
+# finalize_mag_bulk_batch
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_empty_returns_false():
+    study, _ = _make_study()
+    assert study.finalize_mag_bulk_batch() is False
+    assert study.get_bulk_atoms() is None
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_single_candidate():
+    study, atoms = _make_study()
+    magmom = [2.0]
+    study.store_mag_bulk_candidate(0, atoms.copy(), -3.0, magmom)
+    result = study.finalize_mag_bulk_batch()
+
+    assert result is True
+    assert study.is_mag_bulk_batch_finalized() is True
+    assert study.get_bulk_atoms() is not None
+    assert study.get_bulk_magmom() == magmom
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_picks_lowest_energy_per_atom():
+    """Candidate with lower energy/atom wins."""
+    study, atoms = _make_study()
+    # candidate 0: -1.0/atom,  candidate 1: -3.0/atom  ← winner
+    study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, [2.0])
+    study.store_mag_bulk_candidate(1, atoms.copy(), -3.0, [1.0])
+    study.finalize_mag_bulk_batch()
+
+    assert study.get_bulk_magmom() == [1.0]
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_sets_bulk_structure_site_properties():
+    """Winning magmom is written into bulk_structure.site_properties for SlabGenerator."""
+    study, atoms = _make_study()
+    magmom = [2.5]
+    study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, magmom)
+    study.finalize_mag_bulk_batch()
+
+    site_magmoms = study.get_bulk_structure().site_properties.get("magmom")
+    assert site_magmoms is not None
+    assert list(site_magmoms) == magmom
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_raises_on_double_call():
+    study, atoms = _make_study()
+    study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, [0.0])
+    study.finalize_mag_bulk_batch()
+
+    study.store_mag_bulk_candidate(1, atoms.copy(), -2.0, [0.0])
+    with pytest.raises(RuntimeError):
+        study.finalize_mag_bulk_batch()
+
+
+# ---------------------------------------------------------------------------
+# get_bulk_magmom — copy safety
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_get_bulk_magmom_returns_copy():
+    study, atoms = _make_study()
+    study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, [2.0])
+    study.finalize_mag_bulk_batch()
+
+    magmom = study.get_bulk_magmom()
+    magmom[0] = 999.0
+    assert study.get_bulk_magmom()[0] != 999.0

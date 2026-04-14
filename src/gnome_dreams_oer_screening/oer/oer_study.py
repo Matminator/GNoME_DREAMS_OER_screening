@@ -37,15 +37,6 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-"""
-TODO:
-should the terminations builder not fail hard, when some terminations
-may be accetable, but some fail to generate?
-"""
-
-
-
-
 
 class OER_catalyst_study:
     """
@@ -71,8 +62,6 @@ class OER_catalyst_study:
         made to the DFT OH* adsorption energy.
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
-        use_init_as_relaxed_bulk (bool, optional): Whether to use the
-        initial bulk structure as the relaxed bulk structure.
     """
 
     def __init__(self, init_atoms: Atoms,
@@ -81,10 +70,9 @@ class OER_catalyst_study:
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
-                 use_init_as_relaxed_bulk: bool = False,
                  OH_OOH_scaling_intercept: float = 3.2
                  ):
-        
+
          # Avoid mutations outside of this class:
         init_atoms = init_atoms.copy()
         for atom in init_atoms:
@@ -92,13 +80,8 @@ class OER_catalyst_study:
 
         self.init_atoms = init_atoms
         self.init_structure = AseAtomsAdaptor.get_structure(init_atoms)
-        
-        if use_init_as_relaxed_bulk:
-            self.bulk_atoms = self.init_atoms.copy()
-            self.bulk_structure = self.init_structure.copy()
-        else:
-            self.bulk_atoms = None
-            self.bulk_structure = None
+        self.bulk_atoms = None
+        self.bulk_structure = None
             
         self.species_energies = {
             'H2O_gas_free_energy': H2O_gas_free_energy,
@@ -117,13 +100,17 @@ class OER_catalyst_study:
         # self.failed_slab_generation = False
         self.OH_OOH_scaling_intercept = OH_OOH_scaling_intercept
 
+        self._mag_bulk_candidates: dict[int, tuple] = {}  # {idx: (atoms, energy, magmom)}
+        self._mag_bulk_batch_finalized: bool = False
+        self._bulk_magmom: list[float] | None = None
+
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()
     
     def get_init_atoms(self) -> Atoms:
         return self.init_atoms.copy()
     
-    def set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
+    def _set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
                            ) -> None:
             
         # Do not allow resetting the relaxed bulk structure if surfaces 
@@ -201,6 +188,74 @@ class OER_catalyst_study:
             return None
         else:
             return self.bulk_structure.copy()
+
+    def store_mag_bulk_candidate(self, idx: int, atoms: Atoms,
+                                  energy: float, magmom: list[float]) -> None:
+        """Store a completed magnetic bulk result keyed by config index.
+
+        Raises ValueError if magmom length does not match atom count.
+        Raises StructureConsistencyError if atoms are inconsistent with
+        the initial structure (wrong element order, wrong count, etc.).
+        """
+        if len(magmom) != len(atoms):
+            raise ValueError(
+                f"magmom length ({len(magmom)}) does not match "
+                f"number of atoms ({len(atoms)}) for candidate {idx}."
+            )
+        equal_result = are_systems_equal(atoms, self.init_atoms)
+        if not equal_result[0]:
+            raise StructureConsistencyError(
+                f"Candidate {idx} is inconsistent with the initial "
+                f"structure: {equal_result[1]}"
+            )
+        self._mag_bulk_candidates[idx] = (atoms, energy, magmom)
+
+    def set_mag_bulk_batch_finalized(self, value: bool) -> None:
+        self._mag_bulk_batch_finalized = value
+
+    def is_mag_bulk_batch_finalized(self) -> bool:
+        return self._mag_bulk_batch_finalized
+
+    def finalize_mag_bulk_batch(self) -> bool:
+        """
+        Pick the lowest-energy-per-atom magnetic candidate, set it as the
+        relaxed bulk, and store its magmoms as site properties so that
+        SlabGenerator propagates them to slabs.
+        Returns True on success, False if no completed candidates exist.
+        Raises RuntimeError if called after already finalized (indicates a
+        bug in the calling code).
+        """
+        if self._mag_bulk_batch_finalized:
+            raise RuntimeError(
+                "finalize_mag_bulk_batch called after batch already finalized."
+            )
+        if not self._mag_bulk_candidates:
+            return False
+
+        best_idx = min(
+            self._mag_bulk_candidates,
+            key=lambda i: (
+                self._mag_bulk_candidates[i][1] / len(self._mag_bulk_candidates[i][0])
+            ),
+        )
+        best_atoms, _, best_magmom = self._mag_bulk_candidates[best_idx]
+
+        # Calls the existing validated setter (checks atom count, symbols, tags):
+        self._set_relaxed_structure(best_atoms)
+
+        # _set_relaxed_structure converts via AseAtomsAdaptor which drops magmom.
+        # Set site properties explicitly on the now-assigned bulk_structure:
+        for site, m in zip(self.bulk_structure.sites, best_magmom):
+            site.properties["magmom"] = m
+
+        self._bulk_magmom = list(best_magmom)
+        self._mag_bulk_batch_finalized = True
+        return True
+
+    def get_bulk_magmom(self) -> list[float] | None:
+        """Per-atom magnetic moments for the winning bulk configuration.
+        Relaxed VASP moments in production; initial enumerator moments in test mode."""
+        return list(self._bulk_magmom) if self._bulk_magmom is not None else None
 
     def get_distinct_millers(self) -> list[tuple[int, int, int]] | None:
         if self.distinct_millers is None:
@@ -389,9 +444,9 @@ class OER_catalyst_study:
         if self.bulk_atoms is None or self.bulk_structure is None:
             raise RuntimeError(
                 "Cannot rank terminations because the relaxed bulk "
-                "structure is not set. Set it with "
-                "`set_relaxed_structure(...)` or initialize the study "
-                "with `use_init_as_relaxed_bulk=True`."
+                "structure is not set. Use "
+                "`store_mag_bulk_candidate` + `finalize_mag_bulk_batch` "
+                "to set the relaxed bulk through the magnetic workflow."
             )
 
         if max_diff_dict is None:

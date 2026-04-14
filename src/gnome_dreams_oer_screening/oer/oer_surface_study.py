@@ -117,6 +117,7 @@ class OER_surface_study:
         self.add_sites_df_non_relaxed = None
         self.base_surface_relaxed = None
         self.relaxed_surface_energy = None
+        self._relaxed_surface_magmom: list[float] | None = None
         self.add_sites_df_relaxed = None
         
         # This lock prevents further calculations (add-site studies)
@@ -135,11 +136,34 @@ class OER_surface_study:
             out = self.base_surface_relaxed.copy()
         return out
 
-    def set_relaxed_base_surface(self, surface: Atoms, 
+    def get_slab_magmom(self) -> list[float] | None:
+        """
+        Per-atom magnetic moments from the original (non-relaxed) slab as
+        propagated by SlabGenerator from the bulk site_properties["magmom"].
+        Returns None if no magmom site property is set.
+        """
+        magmom = self.original_slab.site_properties.get("magmom")
+        if magmom is None:
+            return None
+        return list(magmom)
+
+    def get_relaxed_surface_magmom(self) -> list[float] | None:
+        """
+        Per-atom magnetic moments extracted from the VASP-relaxed surface.
+        Returns None if set_relaxed_base_surface has not been called yet or
+        if no calculator was attached when it was called.
+        Use get_slab_magmom() for the initial (non-relaxed) magmoms.
+        """
+        if self._relaxed_surface_magmom is not None:
+            return list(self._relaxed_surface_magmom)
+        return None
+
+    def set_relaxed_base_surface(self, surface: Atoms,
                                  energy: float | None = None,
+                                 require_magmom: bool = True,
                                  ) -> bool:
         """
-        Set the relaxed surface structure for this surface study. This 
+        Set the relaxed surface structure for this surface study. This
         is for later use in the determination of adsorption sites and
         adsorption energies.
 
@@ -149,6 +173,15 @@ class OER_surface_study:
             The potential energy of the relaxed surface. If None,
             the energy will be obtained from the relaxed surface
             structure (if possible). Default is None.
+        require_magmom: bool
+            If True (default), raises ValueError when no magnetic moments
+            can be extracted from the surface (no calculator attached or all
+            moments are zero). This is the expected behaviour in any real
+            workflow: a VASP-relaxed surface always carries a calculator with
+            converged magnetic moments.
+            Set to False ONLY in unit tests or fake-result modes where no
+            real VASP calculator is attached. In that case _relaxed_surface_magmom
+            is left as None and get_relaxed_surface_magmom() returns None.
 
         Returns:
         bool
@@ -190,6 +223,21 @@ class OER_surface_study:
                         "not be obtained from the relaxed atoms") from exc
                 
             self.study_locked = False
+
+            # Extract relaxed magmoms BEFORE copy — atoms.copy() does not
+            # preserve the calculator where VASP magmoms live.
+            if surface.calc is not None:
+                moms = surface.get_magnetic_moments()
+                if np.any(np.abs(moms) > 0.01):
+                    self._relaxed_surface_magmom = moms.tolist()
+
+            if require_magmom and self._relaxed_surface_magmom is None:
+                raise ValueError(
+                    "require_magmom=True but no non-zero magnetic moments "
+                    "could be extracted from the relaxed surface (no "
+                    "calculator attached or all moments are zero)."
+                )
+
             self.base_surface_relaxed = surface.copy()
 
         # Return bool on whether the surface is continuous or not. 

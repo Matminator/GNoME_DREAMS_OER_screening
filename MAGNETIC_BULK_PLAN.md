@@ -30,9 +30,13 @@ Only checks atom count, element symbols per index, and tags. Does NOT check posi
 - `production` → uses RPBE sets; `update_log` reads `vasprun.xml`
 - `potcar_spec = False if 'production' in self.mode else True` (existing pattern)
 
-**MAGMOM list to store**: use the enumerator-assigned `config["magmom"]` (initial moments), NOT the converged VASP moments. This is reliable across all modes, is always available, and gives the right magnetic ordering for downstream initialisation.
+**MAGMOM via site properties, not INCAR injection**: `enumerate_magnetic_structures` writes magmoms into `site.properties["magmom"]` on every returned `Structure`. `VaspInputSet` (with `ISPIN=2` already in the RPBE sets) detects this and writes the `MAGMOM` INCAR tag automatically. **No separate magnetic VASP set classes are needed.** The existing `RPBE_relax_bulk_set` and `RPBE_relax_surface_set` are used directly — the only requirement is that the structure passed to them carries the magmoms in site properties.
 
-**`sort_structure=False`**: already passed at every VASP write site. New magnetic sets follow the same pattern — pass through `**kwargs`, not hardcoded in `super()`.
+**MAGMOM list to store**: use **post-relaxation VASP magmoms** (`atoms.get_magnetic_moments().tolist()` from the ASE Atoms returned by `read_vasp_results`). In test/slurm_test modes where no real VASP run occurs, fall back to the initial enumerator `config["magmom"]`. This distinction is handled in `update_log`; `oer_study.py` is agnostic and stores whatever list it receives.
+
+**`sort_structure=False`**: already passed at every VASP write site. No change needed.
+
+**Surface and adsorption MAGMOM**: before calling the existing `surface_relaxation()` (or adsorption relaxation), set `site.properties["magmom"]` on the pymatgen structure from `get_slab_magmom()`. For adsorption, append `0.0` for each adsorbate atom beyond the slab length. Then call the existing relaxation method — no new `magnetic_surface_relaxation()` method needed.
 
 ---
 
@@ -40,203 +44,27 @@ Only checks atom count, element symbols per index, and tags. Does NOT check posi
 
 | File | Change |
 |---|---|
-| **New**: `vasp/magnetic_enumeration.py` | `enumerate_magnetic_structures` + `_extract_mag_config_index` |
-| `vasp/rpbe_relax_sets.py` | `get_RPBE_magnetic_bulk_settings(magmom)` and `get_RPBE_magnetic_surface_settings(magmom)` |
-| `vasp/pre_defined_vasp_sets.py` | `RPBE_relax_magnetic_bulk_set` and `RPBE_relax_magnetic_surface_set` |
-| `vasp/vasp_calculation.py` | `calculational_setup.magnetic_bulk_relaxation()` and `magnetic_surface_relaxation()` |
+| ~~**New**: `vasp/magnetic_enumeration.py`~~ | **Done** — `enumerate_magnetic_structures` + `_extract_mag_config_index` |
+| ~~`vasp/rpbe_relax_sets.py`~~ | **Not needed** — MAGMOM written via site properties, not INCAR injection |
+| ~~`vasp/pre_defined_vasp_sets.py`~~ | **Not needed** — existing sets used directly |
+| ~~`vasp/vasp_calculation.py`~~ | **Not needed** — no new methods; existing `bulk_relaxation` / `surface_relaxation` used |
 | `vasp/job_handler.py` | Batch creation in `enter_process`; submit routing; `update_log` finalization; two helper methods |
 | `oer/oer_study.py` | State fields + `store_mag_bulk_candidate`, `finalize_mag_bulk_batch`, `get_bulk_magmom` |
-| `oer/oer_surface_study.py` | `get_slab_magmom()` |
+| `oer/oer_surface_study.py` | `get_slab_magmom()`, `get_relaxed_surface_magmom()`, `_relaxed_surface_magmom` field, magmom extraction in `set_relaxed_base_surface`, `require_magmom` param |
+| `oer/oer_adsorption_site_study.py` | `get_O_calc_magmom()`, `get_OH_init_magmom()`, `_relaxed_O_magmom` field, magmom extraction in `set_relaxed_O_calc` |
 | `explog/explog.py` | `magnetic_bulk_n_max: int = 4` init param |
 
 ---
 
 ## Implementation
 
-### 1. `vasp/magnetic_enumeration.py` (new file)
+### 1. `vasp/magnetic_enumeration.py` — DONE
 
-```python
-from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
+File exists. Key guarantee: every returned `Structure` has `site.properties["magmom"]` set, and the `"magmom"` key in each config dict mirrors those values.
 
+---
 
-def _ordering_priority(magmoms: list[float]) -> int:
-    """
-    Return a sort key so results are ordered FM → AFM/FiM → NM.
-    FM first ensures the simplest, most common ordering is always included
-    when n_max is small. AFM orderings are frequently the ground state in
-    TM oxides and come second.
-    """
-    nonzero = [m for m in magmoms if abs(m) > 0.1]
-    if not nonzero:
-        return 2  # NM
-    if all(m > 0 for m in nonzero) or all(m < 0 for m in nonzero):
-        return 0  # FM
-    return 1  # AFM or FiM (mixed signs)
-
-
-def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
-    """
-    Returns up to n_max dicts: {"structure": Structure, "magmom": list[float], "ordering": str}
-
-    Filters out orderings that require a supercell (different atom count from input).
-    Sorts results FM → AFM/FiM → NM before applying the n_max cap, so the most
-    physically relevant orderings are always selected regardless of enumlib's
-    internal enumeration order.
-    Falls back to a single non-magnetic entry if enumeration yields nothing.
-    """
-    n_input = len(structure)
-    try:
-        enumerator = MagneticStructureEnumerator(structure, automatic=True)
-        candidates = []
-        for mag_struct, origin in zip(
-            enumerator.ordered_structures, enumerator.ordered_structure_origins
-        ):
-            if len(mag_struct) != n_input:
-                continue  # discard supercell orderings
-            magmoms = [site.properties.get("magmom", 0) for site in mag_struct.sites]
-            candidates.append({
-                "structure": mag_struct,
-                "magmom": magmoms,
-                "ordering": str(origin),
-            })
-    except Exception:
-        candidates = []
-
-    if not candidates:
-        # Non-magnetic material or enumlib unavailable — one NM fallback job
-        return [{
-            "structure": structure,
-            "magmom": [0] * n_input,
-            "ordering": "NM",
-        }]
-
-    # Sort FM first, then AFM/FiM, preserving original order within each group:
-    candidates.sort(key=lambda c: _ordering_priority(c["magmom"]))
-    return candidates[:n_max]
-
-
-def _extract_mag_config_index(process_note: object) -> int | None:
-    """Parse 'mag_config_index=N' from a processNote string. Returns None if absent."""
-    if not isinstance(process_note, str):
-        return None
-    token = "mag_config_index="
-    if token not in process_note:
-        return None
-    tail = process_note.split(token, 1)[1].split("|", 1)[0].strip()
-    try:
-        return int(tail)
-    except (TypeError, ValueError):
-        return None
-```
-
-### 2. `vasp/rpbe_relax_sets.py`
-
-Append two functions (deep copy avoids mutating the shared class-level dict):
-
-```python
-def get_RPBE_magnetic_bulk_settings(magmom: list[float]) -> dict:
-    import copy
-    settings = copy.deepcopy(get_RPBE_bulk_settings())
-    settings["INCAR"]["MAGMOM"] = magmom
-    return settings
-
-
-def get_RPBE_magnetic_surface_settings(magmom: list[float]) -> dict:
-    import copy
-    settings = copy.deepcopy(get_RPBE_surface_settings())
-    settings["INCAR"]["MAGMOM"] = magmom
-    return settings
-```
-
-### 3. `vasp/pre_defined_vasp_sets.py`
-
-Add imports at top:
-```python
-from gnome_dreams_oer_screening.vasp.rpbe_relax_sets import (
-    get_RPBE_bulk_settings, get_RPBE_surface_settings,
-    get_RPBE_magnetic_bulk_settings, get_RPBE_magnetic_surface_settings,
-)
-```
-
-Add two new classes. Each instance gets its own fresh CONFIG dict (avoiding the shared-mutation issue in the existing sets):
-
-```python
-@dataclass
-class RPBE_relax_magnetic_bulk_set(VaspInputSet):
-    CONFIG = get_RPBE_bulk_settings()   # class-level placeholder; shadowed at instance level
-
-    def __init__(self, structure, magmom: list[float], **kwargs):
-        # Instance-level dict — does not mutate the class-level CONFIG
-        self.CONFIG = get_RPBE_magnetic_bulk_settings(magmom)
-        self.CONFIG["KPOINTS"] = heuristic_compute_kpoints(structure, structure_type='bulk')
-        super().__init__(structure=structure, **kwargs)
-        # sort_structure=False is passed via **kwargs from the call site
-
-
-@dataclass
-class RPBE_relax_magnetic_surface_set(VaspInputSet):
-    CONFIG = get_RPBE_surface_settings()   # class-level placeholder
-
-    def __init__(self, structure, magmom: list[float], **kwargs):
-        self.CONFIG = get_RPBE_magnetic_surface_settings(magmom)
-        self.CONFIG["KPOINTS"] = heuristic_compute_kpoints(structure, structure_type='surface')
-        super().__init__(structure=structure, **kwargs)
-```
-
-### 4. `vasp/vasp_calculation.py`
-
-Update import at line 32:
-```python
-from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
-    RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet,
-    RPBE_relax_magnetic_bulk_set, RPBE_relax_magnetic_surface_set)
-```
-
-Add two methods to `calculational_setup`. Mirror the existing `bulk_relaxation` / `surface_relaxation` pattern exactly — including the `production_test` → `TestRelaxSet` fallback:
-
-```python
-def magnetic_bulk_relaxation(self, structure: Structure,
-                              directory: Path, magmom: list[float]) -> None:
-    if self.mode == 'production_test':
-        vasp_set = TestRelaxSet(structure=structure, sort_structure=False)
-    else:
-        vasp_set = RPBE_relax_magnetic_bulk_set(
-            structure=structure, magmom=magmom, sort_structure=False)
-    vasp_set.write_input(directory, potcar_spec=False if 'production' in self.mode else True)
-
-    if 'test' in self.mode:
-        atoms = AseAtomsAdaptor.get_atoms(structure)
-        fake_energy = len(atoms)
-        atoms[0].charge = fake_energy
-        save_fake_results_to_traj(directory, atoms)
-
-
-def magnetic_surface_relaxation(self, structure: Structure,
-                                 directory: Path, magmom: list[float]) -> None:
-    if self.mode == 'production_test':
-        vasp_set = TestRelaxSet(structure=structure, sort_structure=False)
-    else:
-        vasp_set = RPBE_relax_magnetic_surface_set(
-            structure=structure, magmom=magmom, sort_structure=False)
-    vasp_set.write_input(directory, potcar_spec=False if 'production' in self.mode else True)
-
-    if 'test' in self.mode:
-        atoms = AseAtomsAdaptor.get_atoms(structure)
-        # Mirror the surface fake-energy formula from surface_relaxation:
-        K_O = (-14.217) - 0.070 - (-6.77)
-        K_OH = 0.361 + (-6.77)/2 - (-14.217)
-        x = 2.46 + K_O
-        y = 2*x + K_OH - 1.23
-        import numpy as np
-        random_factor = 0 if 'dummy' in self.mode else np.random.normal(0, 1)
-        fake_energy = (x * len(atoms) - y + random_factor
-                       if 'H' in atoms.symbols
-                       else x * len(atoms) + random_factor)
-        atoms[0].charge = fake_energy
-        save_fake_results_to_traj(directory, atoms)
-```
-
-### 5. `oer/oer_study.py`
+### 2. `oer/oer_study.py`
 
 `AseAtomsAdaptor` is already imported at line 8.
 
@@ -264,7 +92,7 @@ def is_mag_bulk_batch_finalized(self) -> bool:
 def finalize_mag_bulk_batch(self) -> bool:
     """
     Pick the lowest-energy magnetic candidate and set it as the
-    relaxed bulk for the first time.  Sets magmom site properties on
+    relaxed bulk for the first time. Sets magmom site properties on
     bulk_structure so that SlabGenerator propagates them to slabs.
     Returns True on success, False if no completed candidates exist.
     """
@@ -293,32 +121,130 @@ def get_bulk_magmom(self) -> list[float] | None:
     return list(self._bulk_magmom) if self._bulk_magmom is not None else None
 ```
 
-### 6. `oer/oer_surface_study.py`
+---
 
-Add one method (reads from `self.original_slab` — pymatgen Slab with site properties intact):
+### 3. `oer/oer_surface_study.py` — DONE
 
+**New state field** (in `__init__`, after `self.relaxed_surface_energy`):
 ```python
-def get_slab_magmom(self) -> list[float] | None:
-    """
-    Returns per-atom magnetic moments from the original (non-relaxed) slab,
-    or None if no magmom site properties are set or all are zero.
-    """
-    magmom = self.original_slab.site_properties.get("magmom")
-    if magmom is None or all(m == 0 for m in magmom):
-        return None
-    return list(magmom)
+self._relaxed_surface_magmom: list[float] | None = None
 ```
 
-### 7. `vasp/job_handler.py`
+**`set_relaxed_base_surface` signature** — new `require_magmom: bool = False` parameter.
+Inside the success branch, before `self.base_surface_relaxed = surface.copy()`:
+```python
+# Extract relaxed magmoms BEFORE copy — atoms.copy() does not preserve the calculator.
+if surface.calc is not None:
+    moms = surface.get_magnetic_moments()
+    if np.any(np.abs(moms) > 0.01):
+        self._relaxed_surface_magmom = moms.tolist()
 
-#### 7a. Imports (top of file)
+if require_magmom and self._relaxed_surface_magmom is None:
+    raise ValueError(
+        "require_magmom=True but no non-zero magnetic moments "
+        "could be extracted from the relaxed surface."
+    )
+```
+If no calculator is attached (test / fake-result modes), `_relaxed_surface_magmom` stays `None`.
+The caller decides the fallback via `require_magmom` or by calling `get_slab_magmom()` explicitly.
+
+**New methods:**
+```python
+def get_slab_magmom(self) -> list[float] | None:
+    """Initial magmoms from original_slab.site_properties["magmom"] (from SlabGenerator).
+    Returns None if the key is absent."""
+    magmom = self.original_slab.site_properties.get("magmom")
+    if magmom is None:
+        return None
+    return list(magmom)
+
+def get_relaxed_surface_magmom(self) -> list[float] | None:
+    """Post-VASP magmoms extracted in set_relaxed_base_surface.
+    Returns None if not yet set or no calculator was attached.
+    Use get_slab_magmom() for the initial (non-relaxed) magmoms."""
+    if self._relaxed_surface_magmom is not None:
+        return list(self._relaxed_surface_magmom)
+    return None
+```
+
+**In `job_handler.py` (4e)** — use both getters:
+- For **surface_relaxation** VASP setup: inject `get_slab_magmom()` (pre-relaxation)
+- For **O/OH adsorption** VASP setup: prefer `get_relaxed_surface_magmom()`; fall back to `get_slab_magmom()`
+
+---
+
+### 3b. `oer/oer_adsorption_site_study.py`
+
+**New state field** (in `__init__`):
+```python
+self._relaxed_O_magmom: list[float] | None = None
+```
+
+**`set_relaxed_O_calc`** — extract magmoms before `.copy()`:
+```python
+if atoms.calc is not None:
+    moms = atoms.get_magnetic_moments()
+    if np.any(np.abs(moms) > 0.01):
+        self._relaxed_O_magmom = moms.tolist()
+self.relaxed_O_atoms = atoms.copy()
+```
+
+**New methods:**
+```python
+def get_O_calc_magmom(self) -> list[float] | None:
+    """Post-VASP magmoms from the O adsorption calculation.
+    Returns None if set_relaxed_O_calc has not been called or no calculator was attached."""
+    if self._relaxed_O_magmom is not None:
+        return list(self._relaxed_O_magmom)
+    return None
+
+def get_OH_init_magmom(self, surface_magmom: list[float] | None) -> list[float] | None:
+    """
+    Initial magmoms for the OH adsorption calculation.
+
+    For on-top sites: uses relaxed O magmoms (self._relaxed_O_magmom) as the base,
+    with [0.0] appended for the H atom. Falls back to surface_magmom + [0.0, 0.0]
+    if O magmoms are unavailable.
+
+    For lattice-O sites: uses surface_magmom (the relaxed surface without the O atom)
+    with [0.0] appended for the H atom. The O atom is already removed from the base.
+
+    Args:
+        surface_magmom: per-atom magmoms for the surface used as the OH base
+                        (get_relaxed_surface_magmom() or get_slab_magmom() from surface_study).
+                        May be None for non-magnetic systems.
+
+    Returns None if no magnetic data is available for either site type.
+    """
+    if self.site_type == 'on-top':
+        base = self._relaxed_O_magmom
+        if base is None:
+            if surface_magmom is None:
+                return None
+            # Fallback: surface magmoms + 0 for O + 0 for H
+            return list(surface_magmom) + [0.0, 0.0]
+        # O calc base already includes the O adsorbate; append 0 for H
+        return list(base) + [0.0]
+    elif self.site_type == 'lattice O':
+        if surface_magmom is None:
+            return None
+        # Lattice-O OH base is the surface with O removed; append 0 for H
+        return list(surface_magmom) + [0.0]
+    return None
+```
+
+---
+
+### 4. `vasp/job_handler.py`
+
+#### 4a. Imports (top of file)
 
 ```python
 from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures, _extract_mag_config_index)
 ```
 
-#### 7b. `__init__` — add parameter
+#### 4b. `__init__` — add parameter
 
 ```python
 def __init__(self, ..., magnetic_bulk_n_max: int = 4, ...) -> None:
@@ -326,9 +252,9 @@ def __init__(self, ..., magnetic_bulk_n_max: int = 4, ...) -> None:
     self.magnetic_bulk_n_max = magnetic_bulk_n_max
 ```
 
-#### 7c. `enter_process` — add bulk batch branch
+#### 4c. `enter_process` — add bulk batch branch
 
-After the OH batch block (line 336-348) and before the final `return _add_single_process(note)`, add:
+After the OH batch block and before the final `return _add_single_process(note)`, add:
 
 ```python
 if job_type == "bulk_relaxation":
@@ -348,7 +274,13 @@ if job_type == "bulk_relaxation":
     return process_ids   # list[int], consistent with OH return type
 ```
 
-#### 7d. `submit_vasp_calculation` — replace `bulk_relaxation` branch (lines 403-413)
+#### 4d. `submit_vasp_calculation` — replace `bulk_relaxation` branch
+
+> **Note**: `job_handler.py` currently calls `study.set_relaxed_structure(atoms)` at lines 944
+> and 1108 (test and production `update_log` blocks). These are the old non-magnetic calls.
+> Both must be **removed** (not just renamed) when implementing 4f — finalization is now
+> handled exclusively by `study.finalize_mag_bulk_batch()` via the `_finalize_mag_bulk_batch`
+> helper. `_set_relaxed_structure` is private and must not be called from outside the class.
 
 ```python
 if job_type == 'bulk_relaxation':
@@ -372,28 +304,28 @@ if job_type == 'bulk_relaxation':
         )
         study._mag_bulk_configs = configs
     config = configs[mag_idx]
-    init_structure = config["structure"]
-    self.calc_setup.magnetic_bulk_relaxation(
-        structure=init_structure, directory=calc_dir, magmom=config["magmom"]
+    # config["structure"] already has site_properties["magmom"] set;
+    # VaspInputSet writes MAGMOM automatically — no separate magnetic set needed.
+    self.calc_setup.bulk_relaxation(
+        structure=config["structure"], directory=calc_dir
     )
 ```
 
-#### 7e. `submit_vasp_calculation` — surface/adsorption MAGMOM injection
+#### 4e. `submit_vasp_calculation` — surface/adsorption MAGMOM injection
 
-For `surface_relaxation` (after existing `init_atoms = surface_study.get_non_relaxed_surface()` line):
+For `surface_relaxation`, after `init_atoms = surface_study.get_non_relaxed_surface()`:
 
 ```python
 init_atoms = surface_study.get_non_relaxed_surface()
 init_structure = AseAtomsAdaptor.get_structure(init_atoms)
 slab_magmom = surface_study.get_slab_magmom()
 if slab_magmom is not None:
-    self.calc_setup.magnetic_surface_relaxation(
-        init_structure, calc_dir, slab_magmom)
-else:
-    self.calc_setup.surface_relaxation(init_structure, calc_dir)
+    for site, m in zip(init_structure.sites, slab_magmom):
+        site.properties["magmom"] = m
+self.calc_setup.surface_relaxation(init_structure, calc_dir)
 ```
 
-For `O_adsorption` and `OH_adsorption` (after existing `init_structure = AseAtomsAdaptor.get_structure(init_atoms)` lines):
+For `O_adsorption` and `OH_adsorption`, after `init_structure = AseAtomsAdaptor.get_structure(init_atoms)`:
 
 ```python
 slab_magmom = surface_study.get_slab_magmom()
@@ -401,15 +333,14 @@ if slab_magmom is not None:
     n_slab = len(slab_magmom)
     n_total = len(init_structure)
     full_magmom = slab_magmom + [0.0] * (n_total - n_slab)
-    self.calc_setup.magnetic_surface_relaxation(
-        init_structure, calc_dir, full_magmom)
-else:
-    self.calc_setup.surface_relaxation(init_structure, calc_dir)
+    for site, m in zip(init_structure.sites, full_magmom):
+        site.properties["magmom"] = m
+self.calc_setup.surface_relaxation(init_structure, calc_dir)
 ```
 
-#### 7f. `update_log` — bulk_relaxation result handling
+#### 4f. `update_log` — bulk_relaxation result handling
 
-**Helper to retrieve magmom for a completed process** (used inside update_log):
+**Helper to retrieve magmom for a completed process:**
 
 ```python
 def _get_config_magmom(self, study, mag_idx: int) -> list[float]:
@@ -425,11 +356,9 @@ def _get_config_magmom(self, study, mag_idx: int) -> list[float]:
     return [0.0] * len(study.get_init_structure())
 ```
 
-**In the test/slurm_test block** (lines 926-995), replace the `bulk_relaxation` handler:
+**In the test/slurm_test block**, replace the `bulk_relaxation` handler:
 
 ```python
-# Energy E = atoms[0].charge is already extracted unconditionally at line 932
-
 if job_type == 'bulk_relaxation':
     mag_idx = _extract_mag_config_index(pdf_row['processNote'])
     if mag_idx is not None:
@@ -446,7 +375,7 @@ if job_type == 'bulk_relaxation':
         self._finalize_mag_bulk_batch(candt_id)
 ```
 
-**In the production block** (lines 997+), for completed bulk_relaxation:
+**In the production block**, for completed `bulk_relaxation`:
 
 ```python
 if job_type == 'bulk_relaxation':
@@ -458,15 +387,9 @@ if job_type == 'bulk_relaxation':
     # (do NOT call set_relaxed_structure here — handled by finalize)
 ```
 
-For FAILED bulk_relaxation in production block: just mark failed (no store). Then:
+For FAILED bulk_relaxation in production block: just mark failed (no store). Then trigger finalization as in test block.
 
-```python
-if job_type == 'bulk_relaxation':
-    if self._all_magnetic_bulk_terminal(candt_id):
-        self._finalize_mag_bulk_batch(candt_id)
-```
-
-#### 7g. New helper methods
+#### 4g. New helper methods
 
 ```python
 def _all_magnetic_bulk_terminal(self, candidate_id: str) -> bool:
@@ -487,7 +410,9 @@ def _finalize_mag_bulk_batch(self, candidate_id: str) -> bool:
     return study.finalize_mag_bulk_batch()
 ```
 
-### 8. `explog/explog.py`
+---
+
+### 5. `explog/explog.py`
 
 Add `magnetic_bulk_n_max: int = 4` to `Explog.init()` and pass to `Job_handler.__init__`.
 
@@ -499,15 +424,20 @@ Add `magnetic_bulk_n_max: int = 4` to `Explog.init()` and pass to `Job_handler._
 |---|---|
 | `are_systems_equal` check passes for magnetic relaxed atoms | ✓ Only checks symbols + tags, not positions |
 | No direct attribute bypass — uses `set_relaxed_structure` | ✓ |
-| `sort_structure=False` preserved in new VASP sets | ✓ Passed via `**kwargs` from call site |
-| CONFIG mutation issue avoided | ✓ Instance-level `self.CONFIG` shadows class-level one |
+| `sort_structure=False` preserved | ✓ Already passed at every VASP write site; no change needed |
+| MAGMOM written via site properties, not INCAR injection | ✓ VaspInputSet handles automatically with existing sets |
+| No new VASP set classes or `vasp_calculation` methods | ✓ Existing `bulk_relaxation` / `surface_relaxation` used directly |
 | Energy extraction correct per mode | ✓ test: `atoms[0].charge`; others: `get_potential_energy()` |
-| `production_test` uses `TestRelaxSet` | ✓ Mirrors existing `bulk_relaxation` |
+| `production_test` uses `TestRelaxSet` | ✓ Handled by existing `bulk_relaxation` method |
 | Failed bulk jobs handled (no `store_mag_bulk_candidate` call) | ✓ |
 | Finalization triggered for BOTH completed AND failed terminal jobs | ✓ |
 | MAGMOM from enumerator config (not ASE atoms) | ✓ Reliable across all modes |
-| Slab MAGMOM from `original_slab` (not ASE conversion chain) | ✓ |
-| Adsorption MAGMOM: slab atoms + `[0.0]` for adsorbate | ✓ |
+| Slab MAGMOM from `original_slab` (not ASE conversion chain) | ✓ `get_slab_magmom()` reads `site_properties["magmom"]` |
+| Relaxed surface MAGMOM extracted before `atoms.copy()` | ✓ `surface.calc is not None` guard; `require_magmom` param for strict mode |
+| Relaxed MAGMOM fallback chain is explicit (caller-controlled, not hidden) | ✓ `get_relaxed_surface_magmom()` returns `None`; caller falls back to `get_slab_magmom()` |
+| On-top OH: O magmoms carry over to OH (OH ≈ O + H) | ✓ `get_OH_init_magmom` uses `_relaxed_O_magmom` + `[0.0]` for H |
+| Lattice-O OH: surface magmoms used (no separate O adsorbate added) | ✓ `get_OH_init_magmom` uses `surface_magmom` + `[0.0]` for H |
+| Adsorption MAGMOM: slab atoms + `[0.0]` for adsorbate | ✓ Site properties set inline before calling existing relaxation |
 | `_mag_bulk_configs` re-enumerated after unpickling | ✓ Fallback in `submit_vasp_calculation` and `_get_config_magmom` |
 | N=1 and N=0 (NM fallback) handled | ✓ |
 | Second `enter_process("bulk_relaxation")` correctly blocked | ✓ Duplicate check finds existing rows |
@@ -517,9 +447,9 @@ Add `magnetic_bulk_n_max: int = 4` to `Explog.init()` and pass to `Job_handler._
 ## Verification
 
 1. **Unit tests** — `tests/`:
-   - `_extract_mag_config_index`: parses correctly, returns None for OH notes
-   - `enumerate_magnetic_structures`: supercell filter; NM fallback; n_max cap
-   - `finalize_mag_bulk_batch`: picks minimum energy; False when empty; magmom set on bulk_structure site properties
+   - `_extract_mag_config_index`: parses correctly, returns None for OH notes — **Done** (`test_magnetic_enumeration.py`)
+   - `enumerate_magnetic_structures`: supercell filter; NM fallback; n_max cap — **Done**
+   - `finalize_mag_bulk_batch`: picks minimum energy; False when empty; magmom set on `bulk_structure` site properties
 
 2. **Integration test** (`tests/production_test_mini_workflow.py`):
    - `add_process(cid, "bulk_relaxation")` → `list[int]` returned; each has `mag_config_index=N` in processNote
@@ -527,7 +457,7 @@ Add `magnetic_bulk_n_max: int = 4` to `Explog.init()` and pass to `Job_handler._
    - `study.get_bulk_atoms()` is set; `study.get_bulk_magmom()` is set
    - `study.bulk_structure.site_properties["magmom"]` is set
    - `initialize_oer_surface_study` → `surface_study.get_slab_magmom()` is not None
-   - Surface submission calls `magnetic_surface_relaxation`
+   - Surface submission: `init_structure` has `site_properties["magmom"]` set before calling `surface_relaxation`
    - INCAR in surface VASP dir contains MAGMOM
 
 3. Run full existing test suite; confirm no regressions.

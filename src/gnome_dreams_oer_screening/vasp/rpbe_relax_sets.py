@@ -6,7 +6,7 @@ def get_RPBE_bulk_settings():
     "INCAR": {
         "ALGO": "FAST",
         "GGA": "RP",
-        "EDIFFG": 0.05,
+        "EDIFFG": -0.05,
         "ENCUT": 520,
         "IBRION": 2,
         "ISIF": 3,
@@ -34,7 +34,7 @@ def get_RPBE_bulk_settings():
         "NELM": 100,
         "NSW": 99,
         "PREC": "Accurate",
-        "SIGMA": 0.05,
+        "SIGMA": 0.1,
     },
     # "KPOINTS": {"reciprocal_density": 64}, # handled separately
     "POTCAR_FUNCTIONAL": "PBE_64",
@@ -144,7 +144,7 @@ def get_RPBE_surface_settings():
     "INCAR": {
         "ALGO": "FAST",
         "GGA": "RP",
-        "EDIFFG": 0.05,
+        "EDIFFG": -0.05,
         "ENCUT": 400,
         "IBRION": 2,
         "ISIF": 0,
@@ -172,7 +172,7 @@ def get_RPBE_surface_settings():
         "NELM": 100,
         "NSW": 99,
         "PREC": "Accurate",
-        "SIGMA": 0.05,
+        "SIGMA": 0.1,
     },
     # "KPOINTS": {"reciprocal_density": 64}, # handled separately
     "POTCAR_FUNCTIONAL": "PBE_64",

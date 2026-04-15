@@ -1,5 +1,4 @@
 from datetime import datetime
-import subprocess
 from pysqa import QueueAdapter
 from pathlib import Path
 from typing import Literal
@@ -1023,14 +1022,19 @@ class Job_handler():
                         surface_studies = study.get_surface_studies()
                         surface_so = surface_studies[termination_index]
                         
-                        if job_type == 'surface_relaxation':                            
-                            surface_so.set_relaxed_base_surface(atoms,E)
-                        else:                                
+                        if job_type == 'surface_relaxation':
+                            # require_magmom=False: test/slurm_test mode has no
+                            # real VASP calculator, so no magmoms are available.
+                            surface_so.set_relaxed_base_surface(
+                                atoms, E, require_magmom=False)
+                        else:
                             ad_site_dict = surface_so.\
                                 get_adsorption_site_studies_dict()
                             ad_study = ad_site_dict[site_index]
                             if job_type == 'O_adsorption':
-                                ad_study.set_relaxed_O_calc(atoms, E)
+                                # require_magmom=False: same reason as above.
+                                ad_study.set_relaxed_O_calc(
+                                    atoms, E, require_magmom=False)
                             elif job_type == 'OH_adsorption':
                                 ad_study.set_relaxed_OH_calc(
                                     atoms, energies=[E]

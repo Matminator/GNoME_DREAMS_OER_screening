@@ -277,14 +277,15 @@ class OER_adsorption_site_study:
         # Extract relaxed magmoms BEFORE copy — atoms.copy() does not preserve the calculator.
         if atoms.calc is not None:
             moms = atoms.get_magnetic_moments()
-            if np.any(np.abs(moms) > 0.01):
-                self._relaxed_O_magmom = moms.tolist()
+            self._relaxed_O_magmom = moms.tolist()
 
         if require_magmom and self._relaxed_O_magmom is None:
             raise ValueError(
-                "require_magmom=True but no non-zero magnetic moments "
-                "could be extracted from the relaxed O structure (no "
-                "calculator attached or all moments are zero)."
+                "require_magmom=True but no magnetic moments could be "
+                "extracted from the relaxed O structure (no calculator "
+                "attached). Set require_magmom=False only in unit tests "
+                "or fake-result modes where no real VASP calculator is "
+                "attached."
             )
 
         self.relaxed_O_atoms = atoms.copy()

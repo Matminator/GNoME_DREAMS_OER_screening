@@ -228,14 +228,15 @@ class OER_surface_study:
             # preserve the calculator where VASP magmoms live.
             if surface.calc is not None:
                 moms = surface.get_magnetic_moments()
-                if np.any(np.abs(moms) > 0.01):
-                    self._relaxed_surface_magmom = moms.tolist()
+                self._relaxed_surface_magmom = moms.tolist()
 
             if require_magmom and self._relaxed_surface_magmom is None:
                 raise ValueError(
-                    "require_magmom=True but no non-zero magnetic moments "
-                    "could be extracted from the relaxed surface (no "
-                    "calculator attached or all moments are zero)."
+                    "require_magmom=True but no magnetic moments could be "
+                    "extracted from the relaxed surface (no calculator "
+                    "attached). Set require_magmom=False only in unit tests "
+                    "or fake-result modes where no real VASP calculator is "
+                    "attached."
                 )
 
             self.base_surface_relaxed = surface.copy()

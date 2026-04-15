@@ -6,6 +6,7 @@ import numpy as np
 from typing import Literal
 
 from ase import Atoms
+from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import read, Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -130,6 +131,18 @@ def clean_up_vasp_directory(
 
 
 def save_fake_results_to_traj(directory: Path, atoms: Atoms):
+    # Expose magmoms via a SinglePointCalculator so that
+    # atoms.get_magnetic_moments() works when the traj is read back.
+    # Uses initial_magmoms from the pymatgen structure conversion if
+    # available (set by enumerate_magnetic_structures via
+    # site_properties["magmom"]), otherwise falls back to zeros.
+    # This ensures the real magmom extraction pipeline is exercised in
+    # test/slurm_test mode without a VASP run.
+    if atoms.has('initial_magmoms'):
+        magmoms = atoms.get_initial_magnetic_moments()
+    else:
+        magmoms = [0.0] * len(atoms)
+    atoms.calc = SinglePointCalculator(atoms, magmoms=magmoms)
     out_traj = Trajectory(directory / "fake_result.traj", "w")
     out_traj.write(atoms)
     out_traj.close()

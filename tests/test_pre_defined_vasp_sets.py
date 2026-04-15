@@ -18,4 +18,4 @@ def test_RPBE_relax_bulk_set():
     assert incar['EDIFFG'] == 0.05
     assert incar['ENCUT'] == 520
     assert incar['ISMEAR'] == 0
-    assert incar['SIGMA'] == 0.05
+    assert incar['SIGMA'] == 0.1

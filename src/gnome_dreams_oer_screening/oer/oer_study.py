@@ -62,6 +62,12 @@ class OER_catalyst_study:
         made to the DFT OH* adsorption energy.
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
+        use_init_as_relaxed_bulk (bool): If True, the init structure is used
+        directly as the relaxed bulk, bypassing the magnetic enumeration
+        pipeline entirely. Intended for testing, notebooks, and non-magnetic
+        materials where running the full magnetic batch (enumerate → store →
+        finalize) is not required. Sets _mag_bulk_batch_finalized = True so
+        finalize_mag_bulk_batch will raise if accidentally called afterwards.
     """
 
     def __init__(self, init_atoms: Atoms,
@@ -70,7 +76,8 @@ class OER_catalyst_study:
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
-                 OH_OOH_scaling_intercept: float = 3.2
+                 OH_OOH_scaling_intercept: float = 3.2,
+                 use_init_as_relaxed_bulk: bool = False,
                  ):
 
          # Avoid mutations outside of this class:
@@ -103,6 +110,11 @@ class OER_catalyst_study:
         self._mag_bulk_candidates: dict[int, tuple] = {}  # {idx: (atoms, energy, magmom)}
         self._mag_bulk_batch_finalized: bool = False
         self._bulk_magmom: list[float] | None = None
+        self._mag_bulk_configs: list[dict] | None = None
+
+        if use_init_as_relaxed_bulk:
+            self._set_relaxed_structure(self.init_atoms)
+            self._mag_bulk_batch_finalized = True
 
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()
@@ -150,6 +162,13 @@ class OER_catalyst_study:
 
         self.bulk_structure = relaxed_bulk_structure
         self.bulk_atoms = relaxed_bulk_atoms
+
+    def set_relaxed_structure(self, atoms: Atoms) -> None:
+        """Bypass for direct bulk setting — used in tests and notebooks.
+        Marks the magnetic batch as finalized so finalize_mag_bulk_batch
+        is not expected to run. Does not raise if already set."""
+        self._set_relaxed_structure(atoms)
+        self._mag_bulk_batch_finalized = True
 
     def set_energies(self,
             H2O_gas_free_energy: float | None = None,
@@ -210,12 +229,11 @@ class OER_catalyst_study:
             )
         self._mag_bulk_candidates[idx] = (atoms, energy, magmom)
 
-    def set_mag_bulk_batch_finalized(self, value: bool) -> None:
-        self._mag_bulk_batch_finalized = value
-
     def is_mag_bulk_batch_finalized(self) -> bool:
         return self._mag_bulk_batch_finalized
 
+
+    # TODO - Consider if this is the best behaviour return False - should it just be a rasing an error..
     def finalize_mag_bulk_batch(self) -> bool:
         """
         Pick the lowest-energy-per-atom magnetic candidate, set it as the
@@ -256,6 +274,23 @@ class OER_catalyst_study:
         """Per-atom magnetic moments for the winning bulk configuration.
         Relaxed VASP moments in production; initial enumerator moments in test mode."""
         return list(self._bulk_magmom) if self._bulk_magmom is not None else None
+
+
+    # TODO LOOK THIS OVER: getattr ???
+    def store_mag_bulk_configs(self, configs: list[dict]) -> None:
+        """Store the enumerated initial magnetic configurations for this study.
+        Called once from enter_process. Raises RuntimeError if configs are already
+        stored — re-storing indicates a duplicate enter_process call."""
+        if getattr(self, '_mag_bulk_configs', None) is not None:
+            raise RuntimeError(
+                "Magnetic bulk configs are already stored for this study. "
+                "store_mag_bulk_configs must only be called once per study."
+            )
+        self._mag_bulk_configs: list[dict] = configs
+
+    def get_mag_bulk_configs(self) -> list[dict] | None:
+        """Return the stored initial magnetic configs, or None if not yet stored."""
+        return getattr(self, '_mag_bulk_configs', None)
 
     def get_distinct_millers(self) -> list[tuple[int, int, int]] | None:
         if self.distinct_millers is None:

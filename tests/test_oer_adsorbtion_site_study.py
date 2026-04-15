@@ -52,7 +52,7 @@ def test_get_OH_adsorbed_atoms_requires_relaxed_O():
 def test_get_OH_adsorbed_atoms_returns_three_distinct_initializations():
     study = _build_simple_on_top_study()
     O_atoms = study.get_atoms_for_O_calc()
-    study.set_relaxed_O_calc(O_atoms, energy=-2.0)
+    study.set_relaxed_O_calc(O_atoms, energy=-2.0, require_magmom=False)
 
     OH_inits = study.get_OH_adsorbed_atoms()
     assert len(OH_inits) == 3
@@ -175,3 +175,38 @@ def test_is_adsorbate_near_site_is_not_applied_for_lattice_o_sites():
     drifted_atoms[2].position += np.array([1.5, 0.0, 0.0])
 
     assert study.is_adsorbate_near_site(drifted_atoms)
+
+
+# ---------------------------------------------------------------------------
+# set_relaxed_O_calc magmom tests
+# ---------------------------------------------------------------------------
+
+class _MockCalc:
+    """Minimal ASE calculator stub that returns pre-set magnetic moments."""
+    def __init__(self, magmoms):
+        self._magmoms = np.array(magmoms)
+    def get_magnetic_moments(self, _atoms=None):
+        return self._magmoms
+
+
+def test_set_relaxed_O_calc_raises_without_magmom_by_default():
+    """Default require_magmom=True raises ValueError when no calculator is attached."""
+    study = _build_simple_on_top_study()
+    O_atoms = study.get_atoms_for_O_calc()  # no calculator attached
+    with pytest.raises(ValueError, match="require_magmom"):
+        study.set_relaxed_O_calc(O_atoms, energy=-2.0)
+
+
+def test_set_relaxed_O_calc_stores_magmom_when_calculator_attached():
+    """Magmoms from a mock calculator are stored and returned via get_O_calc_magmom()."""
+    study = _build_simple_on_top_study()
+    O_atoms = study.get_atoms_for_O_calc()
+    n = len(O_atoms)
+    fake_magmoms = [0.3 * (i % 4 + 1) for i in range(n)]  # all non-zero
+    O_atoms.calc = _MockCalc(fake_magmoms)
+    ok, msg = study.set_relaxed_O_calc(O_atoms, energy=-2.0)
+    assert ok is True
+    result = study.get_O_calc_magmom()
+    assert result is not None
+    assert len(result) == n
+    assert result == pytest.approx(fake_magmoms, abs=1e-6)

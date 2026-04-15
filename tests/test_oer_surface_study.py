@@ -3,12 +3,12 @@ import copy
 import pathlib
 import shutil
 
+import pandas as pd
 import numpy as np
 import pytest
 
 from ase import Atoms
 from ase.io import read
-from pymatgen.io.ase import AseAtomsAdaptor
 
 # --- IMPORTS FROM THIS PROJECT ---
 from gnome_dreams_oer_screening import (
@@ -121,6 +121,14 @@ def _assert_slab_magmoms_match_bulk(surface_study, bulk_structure) -> None:
         )
 
 
+class _MockCalc:
+    """Minimal ASE calculator stub that returns pre-set magnetic moments."""
+    def __init__(self, magmoms):
+        self._magmoms = np.array(magmoms)
+    def get_magnetic_moments(self, _atoms=None):
+        return self._magmoms
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -168,6 +176,42 @@ def TiO2_r_init_surface_study(TiO2_r_bulk):
 # Adsorption site tests
 # ---------------------------------------------------------------------------
 
+def test_adsorption_site_dataframe_has_stable_column_name(
+        TiO2_r_init_surface_study):
+    surface_study, df_init_ads, df_relaxed_ads = TiO2_r_init_surface_study
+    surface_study = copy.deepcopy(surface_study)
+
+    # Test column names are in all the dfs:
+    df = surface_study.get_adsorption_sites_df()
+    assert isinstance(df, pd.DataFrame)
+    assert "ad site element" in df.columns
+    assert "add site element" not in df.columns
+
+    assert isinstance(df_init_ads, pd.DataFrame)
+    assert "ad site element" in df_init_ads.columns
+    assert "add site element" not in df_init_ads.columns
+
+    assert isinstance(df_relaxed_ads, pd.DataFrame)
+    assert "ad site element" in df_relaxed_ads.columns
+    assert "add site element" not in df_relaxed_ads.columns    
+
+
+def test_update_adsorption_energies_skips_incomplete_studies(
+                TiO2_r_init_surface_study):
+    surface_study, _, _ = TiO2_r_init_surface_study
+    surface_study = copy.deepcopy(surface_study)
+
+    site_index = int(surface_study.get_adsorption_sites_df()["Site index"].iloc[0])
+    surface_study.initialize_adsorption_site_study(site_index)
+
+    surface_study.update_adsorption_energies()
+    row = surface_study.get_adsorption_sites_df().loc[site_index]
+
+    assert pd.isna(row["G(O)"])
+    assert pd.isna(row["G(O) deviation"])
+    assert pd.isna(row["ideal overpotential"])
+
+
 def test_adsorbtion_sites_setup(TiO2_r_init_surface_study):
     surface_study, df, df_relaxed = TiO2_r_init_surface_study
 
@@ -178,6 +222,52 @@ def test_adsorbtion_sites_setup(TiO2_r_init_surface_study):
     assert df['reduced coordination'].equals(df_relaxed['reduced coordination'])
     assert df['ad site element'].equals(df_relaxed['ad site element'])
     assert df['site type'].equals(df_relaxed['site type'])
+
+
+
+def test_update_adsorption_energies_does_not_compute_overpotential_without_oh(
+    TiO2_r_init_surface_study,
+):
+    surface_study, _, _ = TiO2_r_init_surface_study
+    surface_study = copy.deepcopy(surface_study)
+    
+    study = surface_study.OER_catalyst_study
+
+    df = surface_study.get_adsorption_sites_df()
+    on_top_site_index = int(df[df["site type"] == "on-top"]["Site index"].iloc[0])
+    surface_study.initialize_adsorption_site_study(on_top_site_index)
+
+    ad_study = surface_study.get_adsorption_site_studies_dict()[on_top_site_index]
+    energies = ad_study.get_adsorption_site_energies()
+    clean_energy = energies["clean_surface_energy"]
+    assert clean_energy is not None
+
+    target_g_o = 2.46
+    constants = study.get_gas_and_energy_corrections()
+    e_add = (
+        clean_energy
+        + target_g_o
+        - constants["O_ad_correction"]
+        - 2 * (constants["H2_gas_free_energy"] / 2)
+        + constants["H2O_gas_free_energy"]
+    )
+    ad_study.set_relaxed_O_calc(ad_study.get_atoms_for_O_calc(),
+                                energy=e_add,
+                                require_magmom=False # Test mode
+                                )
+
+    surface_study.update_adsorption_energies()
+    row = surface_study.get_adsorption_sites_df().loc[on_top_site_index]
+
+    assert row["G(O)"] == pytest.approx(target_g_o, abs=1e-8)
+    assert row["G(O) deviation"] == pytest.approx(0.0, abs=1e-8)
+    assert pd.isna(row["G(OH)"])
+    assert pd.isna(row["G(OH) deviation"])
+    assert pd.isna(row["ideal overpotential"])
+    assert pd.isna(row["G(OOH) from scaling relation"])
+    assert pd.isna(row["G(OOH, scaling) deviation"])
+    assert pd.isna(row["overpotential from OH-OOH scaling relation"])
+
 
 
 def test_adsorbtion_sites_dict(TiO2_r_init_surface_study):
@@ -250,7 +340,7 @@ def test_adsorbtion_update_O_adsorption_energies(TiO2_r_init_surface_study):
         else:
             raise ValueError("Invalid site type in test dataframe:", site_type)
 
-        ad_site_study.set_relaxed_O_calc(O_atoms, energy=E)
+        ad_site_study.set_relaxed_O_calc(O_atoms, energy=E, require_magmom=False)
 
     surface_study.update_adsorption_energies()
     df = surface_study.get_adsorption_sites_df()
@@ -424,6 +514,28 @@ def test_get_relaxed_surface_magmom_returns_none_without_calculator(
     get_relaxed_surface_magmom() returns None."""
     surface_study, _, _ = TiO2_r_init_surface_study
     assert surface_study.get_relaxed_surface_magmom() is None
+
+
+def test_get_relaxed_surface_magmom_returns_values_when_set(TiO2_r_bulk):
+    """Positive path: magmoms from a mock calculator are stored and returned correctly."""
+    atoms, _ = TiO2_r_bulk
+    study = OER_catalyst_study(
+        atoms.copy(), H2_gas_free_energy=-6.77, H2O_gas_free_energy=-14.217,
+    )
+    _finalize(study)
+    study.predict_most_likely_surfaces(method='O-coordination')
+    study.initialize_oer_surface_study(0)
+    surface_study = study.get_surface_studies()[0]
+    relaxed_surface = surface_study.get_non_relaxed_surface()
+    n = len(relaxed_surface)
+    fake_magmoms = [float(i % 3) + 0.5 for i in range(n)]  # non-trivial, non-zero
+    relaxed_surface.calc = _MockCalc(fake_magmoms)
+    ok = surface_study.set_relaxed_base_surface(relaxed_surface, energy=-278.0)
+    assert ok is True
+    result = surface_study.get_relaxed_surface_magmom()
+    assert result is not None
+    assert len(result) == n
+    assert result == pytest.approx(fake_magmoms, abs=1e-6)
 
 
 def test_set_relaxed_base_surface_raises_without_magmom_by_default(TiO2_r_bulk):

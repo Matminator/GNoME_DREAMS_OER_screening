@@ -146,7 +146,7 @@ def enumerate_magnetic_structures(structure, n_max: int = 4
     return candidates[:n_max]
 
 
-def _extract_mag_config_index(process_note: object) -> int | None:
+def extract_mag_config_index(process_note: object) -> int | None:
     """Parse 'mag_config_index=N' from a processNote string. Returns None if absent."""
     if not isinstance(process_note, str):
         return None

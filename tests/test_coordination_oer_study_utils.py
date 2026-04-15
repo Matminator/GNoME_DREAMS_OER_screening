@@ -11,6 +11,21 @@ from gnome_dreams_oer_screening import OER_catalyst_study
 from gnome_dreams_oer_screening.oer.oer_study_utils import (
     determine_coordination_numbers)
 
+
+# Helper method, to cercomvent the magnetic pipeline not relevant for 
+# testing the determine_coordination_numbers function:
+def _finalize_bulk(study: OER_catalyst_study) -> None:
+    """
+    Set the relaxed bulk directly from the init structure.
+    Bypasses the magnetic pipeline — used in tests where no VASP run is 
+    needed.
+    """
+    init_atoms = study.get_init_atoms()
+    study.store_mag_bulk_candidate(
+        0, init_atoms, -999.0, [0.0] * len(init_atoms))
+    study.finalize_mag_bulk_batch()
+
+
 # ______________________________________________________________________
 # ___ Testing of coordination number methods for study object __________
 # --- Testing coordination determination for bulk TiO2 rutile ----------
@@ -20,20 +35,8 @@ def TiO2_r_bulk():
     TiO2_r_path = dir_path / '../notebooks/TiO2_rutile.cif'
     atoms = read(TiO2_r_path.resolve(), format='cif')
     oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
-    if atoms is None:
-        pytest.fail("Slab generation failed")
-    return atoms, oer_study
-
-@pytest.fixture(scope="module")
-def TiO2_r_bulk():
-    dir_path = pathlib.Path(__file__).parent
-    TiO2_r_path = dir_path / '../notebooks/TiO2_rutile.cif'
-    atoms = read(TiO2_r_path.resolve(), format='cif')
-    oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
+        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4)
+    _finalize_bulk(oer_study) # Bypass the magnetic pipeline of the oer_study object
     if atoms is None:
         pytest.fail("Slab generation failed")
     return atoms, oer_study
@@ -81,8 +84,8 @@ def ZrO2_m_bulk():
     ZrO2_m_path = dir_path / '../notebooks/ZrO2_m.cif'
     atoms = read(ZrO2_m_path.resolve(), format='cif')
     oer_study = OER_catalyst_study(
-        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4, 
-        use_init_as_relaxed_bulk=True)
+        atoms, H2_gas_free_energy = -2, H2O_gas_free_energy = -4)
+    _finalize_bulk(oer_study) # Bypass the magnetic pipeline of the oer_study object
     if atoms is None:
         pytest.fail("Slab generation failed")
     return atoms, oer_study

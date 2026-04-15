@@ -42,6 +42,51 @@ def _finalize(study, atoms, energy=-1.0, magmom=None):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.mini
+def test_getters_return_none_when_not_initialized():
+    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
+    study = OER_catalyst_study(
+        atoms,
+        H2_gas_free_energy=-2.0,
+        H2O_gas_free_energy=-4.0,
+    )
+
+    assert study.get_bulk_atoms() is None
+    assert study.get_bulk_structure() is None
+    assert study.get_distinct_millers() is None
+
+
+@pytest.mark.mini
+def test_getters_return_copies_after_initialization():
+    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)
+    study = OER_catalyst_study(
+        atoms,
+        H2_gas_free_energy=-2.0,
+        H2O_gas_free_energy=-4.0,
+    )
+    study.set_relaxed_structure(atoms.copy())
+
+    # Test init atoms are pobulated and returns copy
+    init_atoms = study.get_init_atoms()
+    assert init_atoms is not None
+    assert init_atoms is not study.init_atoms
+
+    # Test bulk atoms are populated and returns copy
+    bulk_atoms = study.get_bulk_atoms()
+    assert bulk_atoms is not None
+    assert bulk_atoms is not study.bulk_atoms
+
+    # Test modifying returned bulk-does not modify the study bulk atoms
+    bulk_atoms.positions[0, 0] += 0.1
+    assert not np.isclose(
+        bulk_atoms.positions[0, 0], study.bulk_atoms.positions[0, 0]
+    )
+
+    bulk_structure = study.get_bulk_structure()
+    assert bulk_structure is not None
+    assert bulk_structure is not study.bulk_structure
+
+
+@pytest.mark.mini
 def test_setup_1():
     """Bulk is None until finalized via the magnetic workflow."""
     atoms = Atoms('Fe', positions=[[0, 0, 0]], cell=[2, 2, 2], pbc=True)

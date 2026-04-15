@@ -23,6 +23,7 @@ class Explog:
         sleep_min = 2,
         reject_if_failed_exists: bool = False,
         require_relaxed_o_for_oh: bool = False,
+        magnetic_bulk_n_max: int = 4,
         ):
         """
         Initialize the experiment log and attached job handler.
@@ -90,13 +91,15 @@ class Explog:
         self.relational_frame = rf
         self.vasp_calculation_dir = vasp_calculation_dir
         self.job_handler = Job_handler(
-            rf, 
+            rf,
             vasp_calculation_dir,
-            mode = mode, 
-            prefix_vasp_dirs_with_prefix = prefix_vasp_dirs,
-            sleep_min = sleep_min,
-            reject_if_failed_exists = reject_if_failed_exists,
-            require_relaxed_o_for_oh = require_relaxed_o_for_oh)
+            mode=mode,
+            prefix_vasp_dirs_with_prefix=prefix_vasp_dirs,
+            sleep_min=sleep_min,
+            reject_if_failed_exists=reject_if_failed_exists,
+            require_relaxed_o_for_oh=require_relaxed_o_for_oh,
+            magnetic_bulk_n_max=magnetic_bulk_n_max,
+        )
         
     def add_candidate(self, 
                       candidate_id: str, 

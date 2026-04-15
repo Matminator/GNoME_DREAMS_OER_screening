@@ -2,7 +2,6 @@ import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii
 from ase.geometry import find_mic
-from typing import TYPE_CHECKING
 
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
     are_all_atoms_connected,
@@ -206,7 +205,8 @@ class OER_adsorption_site_study:
         return d_OH <= max_OH_distance
     
     def set_relaxed_O_calc(self, atoms: Atoms,
-                                energy: float | None = None
+                                energy: float | None = None,
+                                require_magmom: bool = True,
                                 ) -> tuple[bool, str | None]:
         """
         Validate and store one relaxed O-stage structure.
@@ -274,6 +274,19 @@ class OER_adsorption_site_study:
 
 
 
+        # Extract relaxed magmoms BEFORE copy — atoms.copy() does not preserve the calculator.
+        if atoms.calc is not None:
+            moms = atoms.get_magnetic_moments()
+            if np.any(np.abs(moms) > 0.01):
+                self._relaxed_O_magmom = moms.tolist()
+
+        if require_magmom and self._relaxed_O_magmom is None:
+            raise ValueError(
+                "require_magmom=True but no non-zero magnetic moments "
+                "could be extracted from the relaxed O structure (no "
+                "calculator attached or all moments are zero)."
+            )
+
         self.relaxed_O_atoms = atoms.copy()
 
         # Set energy, depending on the site type:
@@ -286,6 +299,56 @@ class OER_adsorption_site_study:
 
         return True, None
             
+    def get_O_calc_magmom(self) -> list[float] | None:
+        """Per-atom magmoms from the relaxed O-stage structure (post-VASP).
+        Returns None if set_relaxed_O_calc hasn't been called or had no calculator."""
+        if self._relaxed_O_magmom is not None:
+            return list(self._relaxed_O_magmom)
+        return None
+
+    def get_O_init_magmom(self, slab_magmom: list[float]) -> list[float]:
+        """Initial MAGMOM list for the O adsorption VASP run, from slab magmoms.
+
+        on-top:    slab magmoms + [0.0] for the added O adsorbate.
+        lattice-O: slab magmoms minus the entry for the removed lattice-O atom.
+        """
+        if self.site_type == 'on-top':
+            return list(slab_magmom) + [0.0]
+        elif self.site_type == 'lattice O':
+            # The lattice-O atom (tag=3) is deleted from the slab for this calc.
+            site_idx = self._get_site_atom_index(self.init_surface)
+            result = list(slab_magmom)
+            del result[site_idx]
+            return result
+        raise ValueError(f"Unsupported site type: {self.site_type}")
+
+    def get_OH_init_magmom(self, surface_magmom: list[float]) -> list[float]:
+        """Initial MAGMOM list for the OH adsorption VASP run.
+
+        on-top:    uses _relaxed_O_magmom (N+1: slab+O) + [0.0] for H = N+2.
+                   Raises RuntimeError if O-stage magmoms are absent.
+        lattice-O: _relaxed_O_magmom covers surface-without-O (N-1, wrong count).
+                   Always uses surface_magmom (N) + [0.0] for H = N+1.
+
+        Raises RuntimeError if surface_magmom is None.
+        """
+        if surface_magmom is None:
+            raise RuntimeError(
+                "surface_magmom is required for OH magmom setup. "
+                "The surface must be relaxed and its magmoms available."
+            )
+        if self.site_type == 'on-top':
+            if self._relaxed_O_magmom is None:
+                raise RuntimeError(
+                    "get_OH_init_magmom called for on-top site before O-stage "
+                    "magmoms are available. set_relaxed_O_calc must be called "
+                    "with a calculator-attached structure first."
+                )
+            return list(self._relaxed_O_magmom) + [0.0]
+        elif self.site_type == 'lattice O':
+            return list(surface_magmom) + [0.0]
+        raise ValueError(f"Unsupported site type: {self.site_type}")
+
     def get_adsorption_site_energies(self) -> dict[str, float | None]:
         return self.energies_dict.copy()
 

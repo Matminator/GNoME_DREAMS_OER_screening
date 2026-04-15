@@ -22,7 +22,7 @@ from pymatgen.core import Lattice, Structure
 
 from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
-    _extract_mag_config_index,
+    extract_mag_config_index,
     _count_magnetic_symmetry_ops,
 )
 
@@ -321,7 +321,7 @@ def test_gnome_Ag3BiCoIr3O14_returns_fm():
 
 
 # ===========================================================================
-# _extract_mag_config_index (no enumlib required, runs on Windows)
+# extract_mag_config_index (no enumlib required, runs on Windows)
 # ===========================================================================
 
 def test_extract_mag_config_index_basic():
@@ -331,34 +331,34 @@ def test_extract_mag_config_index_basic():
     (e.g. NM fallback or single-FM result) job_handler assigns
     mag_config_index=0 so that update_log can look up the magmom uniformly.
     """
-    assert _extract_mag_config_index("mag_config_index=0") == 0
-    assert _extract_mag_config_index("mag_config_index=3") == 3
+    assert extract_mag_config_index("mag_config_index=0") == 0
+    assert extract_mag_config_index("mag_config_index=3") == 3
 
 
 def test_extract_mag_config_index_with_ordering_suffix():
     """Note that includes the ordering label after a pipe still parses correctly."""
-    assert _extract_mag_config_index("mag_config_index=2 | ordering=AFM") == 2
-    assert _extract_mag_config_index("mag_config_index=1 | ordering=fm") == 1
+    assert extract_mag_config_index("mag_config_index=2 | ordering=AFM") == 2
+    assert extract_mag_config_index("mag_config_index=1 | ordering=fm") == 1
 
 
 def test_extract_mag_config_index_oh_note_returns_none():
     """OH-style processNote that has no mag_config_index token returns None."""
-    assert _extract_mag_config_index("OH_init_index=2") is None
-    assert _extract_mag_config_index("OH_init_index=0 | some_other=tag") is None
+    assert extract_mag_config_index("OH_init_index=2") is None
+    assert extract_mag_config_index("OH_init_index=0 | some_other=tag") is None
 
 
 def test_extract_mag_config_index_none_input_returns_none():
     """Non-string inputs (None, int, dict) return None without raising."""
-    assert _extract_mag_config_index(None) is None
-    assert _extract_mag_config_index(42) is None
-    assert _extract_mag_config_index({"key": "value"}) is None
+    assert extract_mag_config_index(None) is None
+    assert extract_mag_config_index(42) is None
+    assert extract_mag_config_index({"key": "value"}) is None
 
 
 def test_extract_mag_config_index_malformed_returns_none():
     """Token present but value is not a valid integer returns None."""
-    assert _extract_mag_config_index("mag_config_index=abc") is None
-    assert _extract_mag_config_index("mag_config_index=") is None
-    assert _extract_mag_config_index("mag_config_index= | ordering=FM") is None
+    assert extract_mag_config_index("mag_config_index=abc") is None
+    assert extract_mag_config_index("mag_config_index=") is None
+    assert extract_mag_config_index("mag_config_index= | ordering=FM") is None
 
 
 def test_extract_mag_config_index_with_prefix():
@@ -369,8 +369,8 @@ def test_extract_mag_config_index_with_prefix():
         processNote = f"{note} | mag_config_index={i} | ordering={ordering}"
     The parser must find the token anywhere in the string, not just at the start.
     """
-    assert _extract_mag_config_index("some_note | mag_config_index=0 | ordering=FM") == 0
-    assert _extract_mag_config_index("candidate=abc | mag_config_index=2 | ordering=AFM") == 2
+    assert extract_mag_config_index("some_note | mag_config_index=0 | ordering=FM") == 0
+    assert extract_mag_config_index("candidate=abc | mag_config_index=2 | ordering=AFM") == 2
 
 
 # ===========================================================================

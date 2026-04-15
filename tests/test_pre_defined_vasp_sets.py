@@ -15,7 +15,7 @@ def test_RPBE_relax_bulk_set():
     incar = bulk_set.CONFIG['INCAR']
     assert incar['GGA'] == 'RP'
     assert incar['ISIF'] == 3
-    assert incar['EDIFFG'] == 0.05
+    assert incar['EDIFFG'] == -0.05
     assert incar['ENCUT'] == 520
     assert incar['ISMEAR'] == 0
-    assert incar['SIGMA'] == 0.1
+    assert incar['SIGMA'] == 0.1, "Expected SIGMA of .1, got {}".format(incar['SIGMA'])

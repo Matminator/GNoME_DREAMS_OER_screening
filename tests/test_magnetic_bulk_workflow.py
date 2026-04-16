@@ -305,8 +305,8 @@ def test_enumerate_magnetic_structures_fe(fe_bcc_atoms):
     structure = AseAtomsAdaptor.get_structure(fe_bcc_atoms)
     configs = enumerate_magnetic_structures(structure)
 
-    assert len(configs) >= 2, (
-        f"Expected >= 2 configs for BCC Fe, got {len(configs)}"
+    assert len(configs) == 2, (
+        f"Expected exactly 2 configs for BCC Fe, got {len(configs)}"
     )
 
     n_atoms = len(fe_bcc_atoms)
@@ -316,7 +316,7 @@ def test_enumerate_magnetic_structures_fe(fe_bcc_atoms):
         assert 'magmom' in cfg
         assert 'ordering' in cfg
 
-        assert len(cfg['magmom']) <= n_atoms, (
+        assert len(cfg['magmom']) == n_atoms, (
             f"Config {i}: magmom length {len(cfg['magmom'])} != n_atoms {n_atoms}"
         )
 
@@ -360,4 +360,4 @@ def test_magnetic_bulk_pipeline_fe(tmp_path, fe_bcc_atoms):
     BCC Fe in a 2-atom conventional cell yields exactly 2 magnetic
     orderings (FM + AFM), both within the default n_max=4 cap.
     """
-    _run_magnetic_bulk_pipeline(fe_bcc_atoms, n_expected=3, tmp_path=tmp_path)
+    _run_magnetic_bulk_pipeline(fe_bcc_atoms, n_expected=2, tmp_path=tmp_path)

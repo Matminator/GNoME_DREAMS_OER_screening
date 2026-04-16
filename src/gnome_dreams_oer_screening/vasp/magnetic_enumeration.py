@@ -103,7 +103,7 @@ def enumerate_magnetic_structures(structure, n_max: int = 4
             enumerator.ordered_structures,
             enumerator.ordered_structure_origins
         ):
-            if len(mag_struct) > n_input:
+            if len(mag_struct) == n_input:
                 continue  # discard supercell orderings
             # MagneticStructureEnumerator stores spin in site.specie.spin, not
             # in site.properties["magmom"]. Write it back into site properties

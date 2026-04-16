@@ -1,44 +1,45 @@
+# Tests for numeric process ID ordering in the Explog processes table.
+#
+# Guards against a regression where process IDs were stored as strings and
+# sorted lexicographically ("0", "1", "10", "11", "2", ...) rather than
+# numerically (0, 1, 2, ..., 111).  This matters when the processes table
+# is sorted or filtered by process_id — string ordering gives wrong results
+# once ID counts exceed 9.
+
 import pytest
 import pandas as pd
 
 from pathlib import Path
-from shutil import rmtree
-from uuid import uuid4
+from ase.io import read
 
-from gnome_dreams_oer_screening import Explog
+from gnome_dreams_oer_screening import Explog, OER_catalyst_study
 
 
 pytestmark = pytest.mark.mini
 
 
-class DummyStudy:
-    def get_bulk_atoms(self):
-        return None
-
-    def get_surface_studies(self):
-        return {}
-
-
-@pytest.fixture()
-def local_explog_dir() -> Path:
-    base = Path(".pytest_tmp_validate_job")
-    base.mkdir(exist_ok=True)
-    path = base / f"test_{uuid4().hex}"
-    path.mkdir(parents=True, exist_ok=True)
-    yield path
-    rmtree(path, ignore_errors=True)
+@pytest.fixture(scope="module")
+def tio2_rutile_atoms():
+    dir_path = Path(__file__).resolve().parent
+    path = dir_path / "../notebooks/TiO2_rutile.cif"
+    return read(path.resolve(), format="cif")
 
 
-# Test that process ids are sorted numerically:
-def test_explog_process_id_sort_is_numeric(local_explog_dir: Path):
-    """
-    Ensure process ids stay numerically ordered in the processes table.
-    This guards against old string-based lexicographic ordering
-    (e.g., 0, 1, 10, 11, 2, ...).
+def test_explog_process_id_sort_is_numeric(tmp_path: Path, tio2_rutile_atoms):
+    """Process IDs are integers and sort numerically, not lexicographically.
+
+    Creates 112 candidates and submits one bulk_relaxation process each.
+    add_process("bulk_relaxation") returns list[int] — one ID per magnetic
+    config; for NM TiO2 this is always a single-element list.
+
+    Verifies:
+      - All IDs collected in creation order equal range(112).
+      - The processes DataFrame stores process_id as an integer dtype.
+      - Ascending and descending pandas sorts reproduce the expected ranges.
     """
     explog = Explog()
     explog.init(
-        vasp_calculation_dir=local_explog_dir,
+        vasp_calculation_dir=tmp_path,
         mode="test",
         prefix_vasp_dirs=False,
     )
@@ -48,12 +49,21 @@ def test_explog_process_id_sort_is_numeric(local_explog_dir: Path):
 
     for idx in range(n_processes):
         candidate_id = f"cand_pid_sort_{idx}"
-        explog.add_candidate(candidate_id, DummyStudy())
-        process_id = explog.add_process(
+        explog.add_candidate(
+            candidate_id=candidate_id,
+            reason_or_hypothesis="process ID sort regression",
+            notes="numeric ordering guard",
+            study_obj=OER_catalyst_study(
+                tio2_rutile_atoms,
+                H2_gas_free_energy=-6.77,
+                H2O_gas_free_energy=-14.217,
+            ),
+        )
+        ids = explog.add_process(
             candidate_id=candidate_id,
             calculation_type="bulk_relaxation",
         )
-        created_ids.append(process_id)
+        created_ids.extend(ids)
 
     # Correct number of processes created (and equivalent to range()):
     assert created_ids == list(range(n_processes))
@@ -67,7 +77,7 @@ def test_explog_process_id_sort_is_numeric(local_explog_dir: Path):
     # Ensure pandas numeric ascending sort yields 0..N-1:
     sorted_ids_asc = process_id_series.sort_values(
         ascending=True, ignore_index=True)
-    
+
     # Test in pandas native integer dtype:
     expected_ids_asc = pd.Series(
         range(n_processes), dtype=sorted_ids_asc.dtype

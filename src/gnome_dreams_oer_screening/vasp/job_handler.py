@@ -3,6 +3,7 @@ from pysqa import QueueAdapter
 from pathlib import Path
 from typing import Literal
 from ase.io import Trajectory
+from ase.calculators.singlepoint import SinglePointCalculator
 from pymatgen.io.ase import AseAtomsAdaptor
 
 import numpy as np
@@ -1023,18 +1024,13 @@ class Job_handler():
                         surface_so = surface_studies[termination_index]
                         
                         if job_type == 'surface_relaxation':
-                            # require_magmom=False: test/slurm_test mode has no
-                            # real VASP calculator, so no magmoms are available.
-                            surface_so.set_relaxed_base_surface(
-                                atoms, E, require_magmom=False)
+                            surface_so.set_relaxed_base_surface(atoms, E)
                         else:
                             ad_site_dict = surface_so.\
                                 get_adsorption_site_studies_dict()
                             ad_study = ad_site_dict[site_index]
                             if job_type == 'O_adsorption':
-                                # require_magmom=False: same reason as above.
-                                ad_study.set_relaxed_O_calc(
-                                    atoms, E, require_magmom=False)
+                                ad_study.set_relaxed_O_calc(atoms, E)
                             elif job_type == 'OH_adsorption':
                                 ad_study.set_relaxed_OH_calc(
                                     atoms, energies=[E]
@@ -1098,6 +1094,19 @@ class Job_handler():
                             )
                         atoms = traj[-1]
                         traj.close()
+                        # Normalise the calculator so magmoms are always
+                        # accessible downstream, while preserving the MLIP
+                        # energy. Energy is mandatory — raises if missing.
+                        # Forces are not needed. Magmoms fall back to zeros
+                        # if the MLIP model provides no spin moments.
+                        _energy = atoms.get_potential_energy()
+                        try:
+                            _magmoms = atoms.get_magnetic_moments()
+                        except Exception:
+                            _magmoms = [0.0] * len(atoms)
+                        atoms.calc = SinglePointCalculator(
+                            atoms, energy=_energy, magmoms=_magmoms
+                        )
                         clean_up_vasp_directory(vasp_dir)
 
                     except Exception:

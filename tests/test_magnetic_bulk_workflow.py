@@ -231,7 +231,15 @@ def _run_magnetic_bulk_pipeline(
     # predict_most_likely_surfaces must be called before any
     # initialize_oer_surface_study call; it raises RuntimeError otherwise.
     # -----------------------------------------------------------------------
-    study.predict_most_likely_surfaces(max_miller=1)
+    # Relaxed slab parameters for the small BCC Fe test cell: the default
+    # min_atoms=20 / max_layers=6 combination can never be satisfied for a
+    # primitive 1×1 cell that has only ~1 atom per layer.
+    study.predict_most_likely_surfaces(
+        max_miller=1,
+        min_atoms=4,
+        min_slab_thickness=4,
+        max_layers=12,
+    )
 
     ranking_df = study.get_termination_rankings()
     assert ranking_df is not None, (

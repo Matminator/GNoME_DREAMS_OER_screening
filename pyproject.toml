@@ -38,7 +38,11 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 filterwarnings = [
-    "ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib.*"
+    "ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib.*",
+    "ignore:Not all sites have property tags:UserWarning:pymatgen.*",
+    "ignore:Not all sites have property wyckoff:UserWarning:pymatgen.*",
+    "ignore:Elements in POSCAR would be overwritten:UserWarning:pymatgen.*",
+    "ignore:Too many sites removed, please use a larger slab:UserWarning:pymatgen.*",
 ]
 
 markers = [

@@ -80,9 +80,6 @@ def test_multiple_bulk_jobs_submitted(tmp_path, TiO2_r_bulk):
     
 def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
 
-    only_reduced_coord_O_sites = True # Use True as default for now
-
-
     atoms = TiO2_r_bulk
     study = _new_oer_study(atoms)
     EXPLOG = Explog()
@@ -100,6 +97,9 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
         candidate_id=cand_id,
         calculation_type="bulk_relaxation",
     )
+    assert len(ids) == 1, "Expected one process, as TiO2 is non-magnetic"
+
+    # Submit the process:
     for pid in ids:
         EXPLOG.submit_process(process_id=pid)
 
@@ -128,40 +128,30 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
 
     study = EXPLOG.relational_frame.candidates[cant_id].study_obj
     ranking = study.get_termination_rankings() # None on first call
-    if ranking is None:
-        # No arguments needs to be provided (all have defaults as shown above):
-        study.predict_most_likely_surfaces(
-        max_miller = max_miller,
-        method = method,
-        stoichiometry_tolerance = stoichiometry_tolerance,
-        all_species_present = all_species_present,
-        symmetrize = symmetrize,
-        select_closest_O_stoichiometry = select_closest_O_stoichiometry,
-        min_slab_thickness = min_slab_thickness,
-        max_slab_thickness = max_slab_thickness,
-        min_atoms = min_atoms,
-        max_atoms = max_atoms,
-        max_layers = max_layers
-        )
-        ranking = study.get_termination_rankings()
+    assert ranking is None, "Expected initial ranking to be None before prediction"
 
-    df = ranking.sort_values('Normalized score', ascending=False)
+    study.predict_most_likely_surfaces(
+    max_miller = max_miller,
+    method = method,
+    stoichiometry_tolerance = stoichiometry_tolerance,
+    all_species_present = all_species_present,
+    symmetrize = symmetrize,
+    select_closest_O_stoichiometry = select_closest_O_stoichiometry,
+    min_slab_thickness = min_slab_thickness,
+    max_slab_thickness = max_slab_thickness,
+    min_atoms = min_atoms,
+    max_atoms = max_atoms,
+    max_layers = max_layers
+    )
+    ranking = study.get_termination_rankings()
+    assert isinstance(ranking, pd.DataFrame)
+
+    termination_index = 0
+    df = study.get_init_adsorption_sites_df(termination_index)
     assert isinstance(df, pd.DataFrame)
 
-    cand_id = cand_id # will be needed to get the study object...
-    termination_index = 0 # What termination to yield the adsorption sites for
-
-    # Arg which may be left out (for now):
-
-    df = study.get_init_adsorption_sites_df(termination_index, 
-                    only_reduced_coord_O_sites=only_reduced_coord_O_sites)
-    
-    assert isinstance(df, pd.DataFrame)
-
-    
     study = EXPLOG.relational_frame.candidates.df['study_obj'][0]
     study.initialize_oer_surface_study(0)
-
 
     p_id = EXPLOG.add_process( 
     candidate_id = cant_id,
@@ -169,13 +159,8 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
     termination_index = termination_index
     )
 
-
     EXPLOG.submit_process(process_id = p_id)
-
     EXPLOG.update_log()
-    EXPLOG.relational_frame.processes.df
-
-
     surface_study = study.get_surface_studies()[0]
 
     # =========================================================================
@@ -183,7 +168,7 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
     # =========================================================================
     # Use only_reduced_coord_O_sites=False to get both site types (on-top and
     # lattice O). TiO2 rutile at miller=1 produces both.
-    surface_study.determine_adsorption_sites(only_reduced_coord_O_sites=False)
+    surface_study.determine_adsorption_sites()
 
     df = surface_study.get_adsorption_sites_df()
     assert isinstance(df, pd.DataFrame)
@@ -226,7 +211,7 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
         "Lattice O (tag=3) must be absent from the lattice-O O calc structure"
     )
 
-    # --- oh_batch_finalized defaults to True ---
+    # --- oh_batch_finalized defaults to True --- # TODO... WHY IS THIS DEFAULT CONVENTIONALLY TRUE?
     # Design: direct/manual workflows expose OH metrics immediately; Job_handler
     # flips this to False when OH jobs are submitted and restores True when all 3
     # OH processes reach terminal status.
@@ -238,8 +223,8 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
     # --- No relaxed structures set yet ---
     assert on_top_study.relaxed_O_atoms is None, "No O_adsorption run yet"
     assert on_top_study.relaxed_OH_atoms is None, "No OH_adsorption run yet"
-    assert lattice_o_study.relaxed_O_atoms is None
-    assert lattice_o_study.relaxed_OH_atoms is None
+    assert lattice_o_study.relaxed_O_atoms is None, "No O_adsorption run yet"
+    assert lattice_o_study.relaxed_OH_atoms is None, "No OH_adsorption run yet"
 
     # --- Initial energies_dict ---
     # on-top: constructor stores relaxed_surface_energy as clean_surface_energy
@@ -261,7 +246,7 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
         "lattice-O: clean_surface_energy is None until O_adsorption job completes "
         "(job removes lattice O and relaxes the remaining surface)"
     )
-    assert lattice_o_e['OH_adsorbed_energy'] is None
+    assert lattice_o_e['OH_adsorbed_energy'] is None, "OH_adsorption not run yet"
 
     # --- All G values None before any DFT jobs ---
     surface_study.update_adsorption_energies()

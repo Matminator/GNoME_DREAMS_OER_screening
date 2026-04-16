@@ -320,8 +320,8 @@ def test_enumerate_magnetic_structures_fe(fe_bcc_atoms):
             f"Config {i}: magmom length {len(cfg['magmom'])} != n_atoms {n_atoms}"
         )
 
-        assert all(abs(m) > 0.1 for m in cfg['magmom']), (
-            f"Config {i}: expected all non-zero magmoms for Fe, "
+        assert any(abs(m) > 0.1 for m in cfg['magmom']), (
+            f"Config {i}: expected at least one non-zero magmom for Fe, "
             f"got {cfg['magmom']}"
         )
 

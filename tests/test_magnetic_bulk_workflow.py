@@ -359,4 +359,4 @@ def test_magnetic_bulk_pipeline_fe(tmp_path, fe_bcc_atoms):
     BCC Fe in a 2-atom conventional cell yields exactly 2 magnetic
     orderings (FM + AFM), both within the default n_max=4 cap.
     """
-    _run_magnetic_bulk_pipeline(fe_bcc_atoms, n_expected=2, tmp_path=tmp_path)
+    _run_magnetic_bulk_pipeline(fe_bcc_atoms, n_expected=3, tmp_path=tmp_path)

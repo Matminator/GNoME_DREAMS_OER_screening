@@ -655,8 +655,6 @@ def test_magmom_propagates_gnome_IrO4Pd_manually_assigned():
     _finalize_with_magmoms(study, magmoms)
 
     study.predict_most_likely_surfaces(method='O-coordination')
-    if not study.get_terminations_dict():
-        pytest.skip("No surfaces generated for IrO4Pd within timeout")
 
     study.initialize_oer_surface_study(0)
     surface_study = study.get_surface_studies()[0]
@@ -685,10 +683,8 @@ def test_magmom_propagates_gnome_Fe2Ir2O12Rh2_enumerated():
     study.store_mag_bulk_candidate(0, study.get_init_atoms(), -1.0, best["magmom"])
     study.finalize_mag_bulk_batch()
 
+    study.predict_most_likely_surfaces(max_miller=1)
     ranking_df = study.get_termination_rankings()
-    study.predict_most_likely_surfaces(method='O-coordination')
-    # if not study.get_terminations_dict():
-    #     pytest.skip("No surfaces generated for Fe2Ir2O12Rh2 within timeout")
     valid_rows = ranking_df[ranking_df['Score'].notna()]
     assert len(valid_rows) >= 1, (
         "At least one termination must have a non-NaN score — a NaN score "
@@ -729,9 +725,7 @@ def test_magmom_propagates_gnome_Ag3BiCoIr3O14_co_only_magnetic():
     study.store_mag_bulk_candidate(0, study.get_init_atoms(), -1.0, best["magmom"])
     study.finalize_mag_bulk_batch()
 
-    study.predict_most_likely_surfaces(method='O-coordination')
-    if not study.get_terminations_dict():
-        pytest.skip("No surfaces generated for Ag3BiCoIr3O14 within timeout")
+    study.predict_most_likely_surfaces()
 
     study.initialize_oer_surface_study(0)
     surface_study = study.get_surface_studies()[0]

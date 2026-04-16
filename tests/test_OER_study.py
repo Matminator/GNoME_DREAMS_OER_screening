@@ -142,7 +142,7 @@ def test_error_apon_setting_relaxed_structure():
 
 @pytest.mark.mini
 def test_set_relaxed_structure_raises_structure_consistency_error():
-    """Reordered atoms raise StructureConsistencyError (different symbol order) at store time."""
+    """Foreign element raises StructureConsistencyError at store time."""
     atoms = Atoms(
         "TiO",
         positions=[[0, 0, 0], [1, 0, 0]],
@@ -153,9 +153,14 @@ def test_set_relaxed_structure_raises_structure_consistency_error():
         atoms, H2_gas_free_energy=-2, H2O_gas_free_energy=-4,
     )
 
-    reordered_atoms = oer_study.get_init_atoms()[[1, 0]]
-    with pytest.raises(StructureConsistencyError, match="different symbols"):
-        oer_study.store_mag_bulk_candidate(0, reordered_atoms, -1.0, [0.0, 0.0])
+    foreign_atoms = Atoms(
+        "TiCu",
+        positions=[[0, 0, 0], [1, 0, 0]],
+        cell=[2, 2, 2],
+        pbc=True,
+    )
+    with pytest.raises(StructureConsistencyError, match="not present in"):
+        oer_study.store_mag_bulk_candidate(0, foreign_atoms, -1.0, [0.0, 0.0])
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +367,47 @@ def test_finalize_mag_bulk_batch_picks_lowest_energy_per_atom():
     study.finalize_mag_bulk_batch()
 
     assert study.get_bulk_magmom() == [1.0]
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_smaller_cell_wins_on_epa():
+    """1-atom primitive wins when its E/atom is lower than the 2-atom candidate.
+
+    The study is initialised with a 2-atom cell; the 1-atom candidate has fewer
+    atoms but contains only elements already in the reference — assert_elements_subset
+    must accept it, and finalize_mag_bulk_batch must select it on E/atom grounds.
+    """
+    atoms_2 = Atoms('FeFe', positions=[[0, 0, 0], [2, 2, 2]], cell=[4, 4, 4], pbc=True)
+    study = OER_catalyst_study(atoms_2, H2_gas_free_energy=-2.0, H2O_gas_free_energy=-4.0)
+    atoms_1 = Atoms('Fe', positions=[[0, 0, 0]], cell=[4, 4, 4], pbc=True)
+
+    # 1-atom: E/atom = -3.0 (winner);  2-atom: E/atom = -1.0
+    study.store_mag_bulk_candidate(0, atoms_1.copy(), -3.0, [2.0])
+    study.store_mag_bulk_candidate(1, atoms_2.copy(), -2.0, [2.0, -2.0])
+    study.finalize_mag_bulk_batch()
+
+    assert study.get_bulk_magmom() == [2.0], (
+        "1-atom candidate (E/atom=-3) must beat the 2-atom candidate (E/atom=-1)"
+    )
+    assert len(study.get_bulk_atoms()) == 1
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_larger_cell_wins_on_epa():
+    """2-atom conventional cell wins when its E/atom is lower than the 1-atom candidate."""
+    atoms_2 = Atoms('FeFe', positions=[[0, 0, 0], [2, 2, 2]], cell=[4, 4, 4], pbc=True)
+    study = OER_catalyst_study(atoms_2, H2_gas_free_energy=-2.0, H2O_gas_free_energy=-4.0)
+    atoms_1 = Atoms('Fe', positions=[[0, 0, 0]], cell=[4, 4, 4], pbc=True)
+
+    # 1-atom: E/atom = -1.0;  2-atom: E/atom = -3.0 (winner)
+    study.store_mag_bulk_candidate(0, atoms_1.copy(), -1.0, [2.0])
+    study.store_mag_bulk_candidate(1, atoms_2.copy(), -6.0, [2.0, -2.0])
+    study.finalize_mag_bulk_batch()
+
+    assert study.get_bulk_magmom() == [2.0, -2.0], (
+        "2-atom candidate (E/atom=-3) must beat the 1-atom candidate (E/atom=-1)"
+    )
+    assert len(study.get_bulk_atoms()) == 2
 
 
 @pytest.mark.mini

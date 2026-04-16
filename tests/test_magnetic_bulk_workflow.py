@@ -204,7 +204,9 @@ def _run_magnetic_bulk_pipeline(
         f"get_bulk_magmom() should have at most {n_atoms} entries, got {len(bulk_magmom)}"
     )
 
-    # In test mode all fake energies are 0 → min is stable at config 0:
+    # In test mode, fake energy = len(atoms), so E/atom = 1 for every config
+    # regardless of cell size.  All candidates tie; Python's min() returns the
+    # first (config 0):
     winning_magmom = stored_configs[0]['magmom']
     assert bulk_magmom == winning_magmom, (
         f"In test mode (all E=0), config 0 wins. "
@@ -309,15 +311,17 @@ def test_enumerate_magnetic_structures_fe(fe_bcc_atoms):
         f"Expected at least 2 configs for BCC Fe, got {len(configs)}"
     )
 
-    n_atoms = len(fe_bcc_atoms)
-
     for i, cfg in enumerate(configs):
         assert 'structure' in cfg
         assert 'magmom' in cfg
         assert 'ordering' in cfg
 
-        assert len(cfg['magmom']) == n_atoms, (
-            f"Config {i}: magmom length {len(cfg['magmom'])} != n_atoms {n_atoms}"
+        # Each config may have a different atom count from the input structure
+        # (the FM ordering for a 2-atom BCC cell reduces to the 1-atom primitive).
+        n_cfg_atoms = len(cfg['structure'].sites)
+        assert len(cfg['magmom']) == n_cfg_atoms, (
+            f"Config {i}: magmom length {len(cfg['magmom'])} != "
+            f"structure atom count {n_cfg_atoms}"
         )
 
         assert any(abs(m) > 0.1 for m in cfg['magmom']), (
@@ -360,4 +364,4 @@ def test_magnetic_bulk_pipeline_fe(tmp_path, fe_bcc_atoms):
     BCC Fe in a 2-atom conventional cell yields exactly 2 magnetic
     orderings (FM + AFM), both within the default n_max=4 cap.
     """
-    _run_magnetic_bulk_pipeline(fe_bcc_atoms, n_expected=2, tmp_path=tmp_path)
+    _run_magnetic_bulk_pipeline(fe_bcc_atoms, n_expected=3, tmp_path=tmp_path)

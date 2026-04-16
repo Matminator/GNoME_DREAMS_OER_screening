@@ -23,8 +23,7 @@ from gnome_dreams_oer_screening.oer.ad_site_determination import (
 )
 
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
-    are_systems_equal,
-    StructureConsistencyError,
+    assert_elements_subset,
 )
 
 # Suppress specific warnings from pymatgen about too many sites removed.
@@ -151,14 +150,12 @@ class OER_catalyst_study:
         # Make a copy, to avoide mutations outside of this class
         relaxed_bulk = relaxed_bulk.copy() 
         
-        # Test provided relaxed_bulk structure matches the initial bulk:
-        equal_results = are_systems_equal(relaxed_bulk_atoms, self.init_atoms)
-        if not equal_results[0]:
-            raise StructureConsistencyError(
-                "The provided relaxed_bulk structure does not match "
-                "the initial bulk structure. Details: "
-                f"{equal_results[1]}"
-            )
+        # Allow primitive-cell representations of the same material.  Only require
+        # that the relaxed bulk contains no elements absent from the initial
+        # structure — atom count may differ if the enumerator reduced the cell.
+        assert_elements_subset(
+            relaxed_bulk_atoms, self.init_atoms, label="relaxed_bulk"
+        )
 
         self.bulk_structure = relaxed_bulk_structure
         self.bulk_atoms = relaxed_bulk_atoms
@@ -221,12 +218,13 @@ class OER_catalyst_study:
                 f"magmom length ({len(magmom)}) does not match "
                 f"number of atoms ({len(atoms)}) for candidate {idx}."
             )
-        equal_result = are_systems_equal(atoms, self.init_atoms)
-        if not equal_result[0]:
-            raise StructureConsistencyError(
-                f"Candidate {idx} is inconsistent with the initial "
-                f"structure: {equal_result[1]}"
-            )
+        # Allow primitive-cell representations: only require that the candidate
+        # contains no elements absent from the initial structure.  The enumerator
+        # may return a cell with fewer atoms (e.g. FM BCC Fe collapses to the
+        # 1-atom primitive cell), which is valid as long as no new species appear.
+        assert_elements_subset(
+            atoms, self.init_atoms, label=f"Candidate {idx}"
+        )
         self._mag_bulk_candidates[idx] = (atoms, energy, magmom)
 
     def is_mag_bulk_batch_finalized(self) -> bool:

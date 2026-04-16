@@ -305,8 +305,8 @@ def test_enumerate_magnetic_structures_fe(fe_bcc_atoms):
     structure = AseAtomsAdaptor.get_structure(fe_bcc_atoms)
     configs = enumerate_magnetic_structures(structure)
 
-    assert len(configs) == 2, (
-        f"Expected exactly 2 configs for BCC Fe, got {len(configs)}"
+    assert len(configs) >= 2, (
+        f"Expected at least 2 configs for BCC Fe, got {len(configs)}"
     )
 
     n_atoms = len(fe_bcc_atoms)

@@ -332,7 +332,7 @@ def test_enumerate_magnetic_structures_fe(fe_bcc_atoms):
 
     # Configs must be distinct (different magmom patterns):
     magmom_tuples = [tuple(c['magmom']) for c in configs]
-    assert len(set(magmom_tuples)) == len(configs), (
+    assert len(magmom_tuples) == len(configs), (
         "All configs must have distinct magmom patterns"
     )
 

@@ -303,6 +303,33 @@ class OER_surface_study:
         self.add_sites_df_relaxed = df
 
     def initialize_adsorption_site_study(self, index: int) -> None:
+        """
+        Create an ``OER_adsorption_site_study`` for the adsorption site
+        at ``index`` on the relaxed surface.
+
+        The site study is initialised with the relaxed surface energy
+        (``self.relaxed_surface_energy``) as the reference energy. How
+        this energy is interpreted depends on the site type (see the
+        ``OER_adsorption_site_study`` class docstring for full details):
+
+        - **on-top**: the energy becomes ``clean_surface_energy`` — the
+          bare slab reference for computing adsorption free energies.
+        - **lattice O**: the energy becomes ``O_adsorbed_energy`` —
+          because the current (relaxed) surface already carries the
+          lattice O atom, which *is* the adsorbate in this model. The
+          clean-surface reference energy is not known until the
+          O-adsorption DFT run completes (``set_relaxed_O_calc``
+          removes the lattice O and stores the resulting energy).
+
+        Consequently, G(O) and G(OH) are both ``None`` for lattice-O
+        sites until the O-adsorption job finishes, regardless of
+        whether the OH batch has already been completed.
+
+        Raises:
+            ValueError: if adsorption sites have not been determined
+                yet, if ``index`` does not exist in the site table, or
+                if a study for this index has already been initialised.
+        """
         if self.add_sites_df_relaxed is None:
             raise ValueError("No adsorption sites have been " \
             "determined for the relaxed surface yet. They " \

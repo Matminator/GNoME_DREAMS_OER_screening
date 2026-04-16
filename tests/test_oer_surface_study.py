@@ -685,12 +685,18 @@ def test_magmom_propagates_gnome_Fe2Ir2O12Rh2_enumerated():
     study.store_mag_bulk_candidate(0, study.get_init_atoms(), -1.0, best["magmom"])
     study.finalize_mag_bulk_batch()
 
+    ranking_df = study.get_termination_rankings()
     study.predict_most_likely_surfaces(method='O-coordination')
-    if not study.get_terminations_dict():
-        pytest.skip("No surfaces generated for Fe2Ir2O12Rh2 within timeout")
-
-    study.initialize_oer_surface_study(0)
-    surface_study = study.get_surface_studies()[0]
+    # if not study.get_terminations_dict():
+    #     pytest.skip("No surfaces generated for Fe2Ir2O12Rh2 within timeout")
+    valid_rows = ranking_df[ranking_df['Score'].notna()]
+    assert len(valid_rows) >= 1, (
+        "At least one termination must have a non-NaN score — a NaN score "
+        "indicates no valid slab could be generated for any termination"
+    )
+    termination_index = int(valid_rows.iloc[0]['Termination index'])
+    study.initialize_oer_surface_study(termination_index)
+    surface_study = study.get_surface_studies()[termination_index]
     _assert_slab_magmoms_match_bulk(surface_study, study.get_bulk_structure())
 
     # Additionally verify that Fe atoms in the slab carry a non-trivial magmom

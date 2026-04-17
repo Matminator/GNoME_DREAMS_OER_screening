@@ -6,6 +6,8 @@ import pandas as pd
 from pathlib import Path
 from ase.io import read
 
+from pymatgen.io.vasp import Incar as VaspIncar, Poscar
+
 from gnome_dreams_oer_screening import OER_catalyst_study, Explog
 
 # ─── CLI argument ──────────────────────────────────────────────────────────────
@@ -105,6 +107,42 @@ check(
     "Relaxed bulk structure must be set after bulk batch finalizes",
 )
 
+# ── MAGMOM: VASP INCAR files ──────────────────────────────────────────────────
+print(f"{elapsed()}  [magmom] Checking INCAR files", flush=True)
+incar_files = list(OUTPUT_DIR.rglob("INCAR"))
+if incar_files:
+    for incar_f in incar_files:
+        incar_parsed = VaspIncar.from_file(incar_f)
+        check(
+            "MAGMOM" in incar_parsed,
+            f"INCAR must contain MAGMOM tag ({incar_f.parent.name}/INCAR)",
+        )
+        poscar_f = incar_f.parent / "POSCAR"
+        if poscar_f.exists():
+            n_atoms = len(Poscar.from_file(poscar_f).structure)
+            n_magmoms = len(incar_parsed["MAGMOM"])
+            check(
+                n_magmoms == n_atoms,
+                f"MAGMOM count ({n_magmoms}) must match atom count ({n_atoms})"
+                f" in {incar_f.parent.name}",
+            )
+    print(f"{elapsed()}  [magmom] Verified MAGMOM in {len(incar_files)} INCAR file(s)", flush=True)
+else:
+    print(f"{elapsed()}  [magmom] No INCAR files found — MLIP mode, skipping file check", flush=True)
+
+# ── MAGMOM: relaxed bulk structure site_properties ────────────────────────────
+bulk_struct = study.get_bulk_structure()
+check(
+    "magmom" in bulk_struct.site_properties,
+    "Relaxed bulk pymatgen Structure must have 'magmom' in site_properties",
+)
+bulk_magmoms = bulk_struct.site_properties["magmom"]
+check(
+    len(bulk_magmoms) == len(bulk_struct),
+    f"Magmom list length ({len(bulk_magmoms)}) must equal site count ({len(bulk_struct)})",
+)
+print(f"{elapsed()}  [magmom] Bulk magmoms: {bulk_magmoms}", flush=True)
+
 # ── Surface prediction + termination selection ────────────────────────────────
 print(f"\n{elapsed()}  ── Surface prediction ──", flush=True)
 
@@ -175,6 +213,11 @@ check(
     "Relaxed surface must be set after surface_relaxation completes",
 )
 
+# ── MAGMOM: surface study slab magmom ────────────────────────────────────────
+slab_magmom = surface_study.get_slab_magmom()
+check(slab_magmom is not None, "Slab magmom must be set after surface_relaxation")
+print(f"{elapsed()}  [magmom] Slab magmom: {slab_magmom}", flush=True)
+
 surface_study.determine_adsorption_sites(only_reduced_coord_O_sites=False)
 df = surface_study.get_adsorption_sites_df()
 check(
@@ -226,6 +269,14 @@ check(
     "G(O) must be finite after lattice-O O_adsorption",
 )
 
+# ── MAGMOM: relaxed O structures ─────────────────────────────────────────────
+for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
+    check(
+        ad_st._relaxed_O_magmom is not None,
+        f"{site_label}: _relaxed_O_magmom must be set after O_adsorption",
+    )
+    print(f"{elapsed()}  [magmom] {site_label} O magmom: {ad_st._relaxed_O_magmom}", flush=True)
+
 # ── Stage 4: OH adsorption — both sites in parallel (6 jobs) ─────────────────
 print(f"\n{elapsed()}  ── Stage 4: OH adsorption (on-top×3 + lattice-O×3 in parallel) ──",
       flush=True)
@@ -257,6 +308,19 @@ oh_statuses = wait_for_terminal(
 )
 for pid, s in oh_statuses.items():
     check(s == "completed", f"OH process {pid} must complete (got: {s})")
+
+# ── MAGMOM: relaxed OH structures ────────────────────────────────────────────
+for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
+    oh_atoms = ad_st.relaxed_OH_atoms
+    check(oh_atoms is not None, f"{site_label}: relaxed_OH_atoms must be set")
+    oh_init_magmoms = oh_atoms.arrays.get("initial_magmoms")
+    check(
+        oh_init_magmoms is not None and len(oh_init_magmoms) == len(oh_atoms),
+        f"{site_label}: relaxed OH atoms must have 'initial_magmoms' array "
+        f"of length {len(oh_atoms)}",
+    )
+    print(f"{elapsed()}  [magmom] {site_label} OH initial magmoms (first 5): "
+          f"{oh_init_magmoms[:5]}", flush=True)
 
 # ── Stage 5: Final metric checks ──────────────────────────────────────────────
 print(f"\n{elapsed()}  ── Stage 5: Final metric checks ──", flush=True)

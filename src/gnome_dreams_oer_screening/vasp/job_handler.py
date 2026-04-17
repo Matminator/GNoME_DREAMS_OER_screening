@@ -157,142 +157,6 @@ class Job_handler():
         if not validation_result.ok:
             validation_result.raise_for_error()
 
-        # DEPRECATED SANITY CHECKS START
-        # Get the candidates and processes rows from:
-        # cand_row = self.rframe.candidates[candidate_id]
-        # cand_processes = cand_row.processes
-        #
-        # # --- Test if calculation is appropriate -----------------------
-        # pdf = cand_processes.df.copy()
-        #
-        # # Base filters
-        # mask = (
-        #     (pdf["status"] != "failed") &
-        #     (pdf["job_type"] == job_type)
-        # )
-        #
-        # # Termination filter
-        # if termination_index is None:
-        #     termination_mask = pdf["termination_index"].isna()
-        # else:
-        #     termination_mask = pdf["termination_index"] \
-        #         == termination_index
-        #
-        # # Site filter
-        # if site_index is None:
-        #     site_mask = pdf["site_index"].isna()
-        # else:
-        #     site_mask = pdf["site_index"] == site_index
-        #
-        # matching_pdf = pdf[termination_mask & site_mask]
-        # pdf = matching_pdf[
-        #     (matching_pdf["status"] != "failed")
-        #     & (matching_pdf["job_type"] == job_type)
-        # ]
-        #
-        # # If non-finished or completed calculation exists: non-valied:
-        # non_valid_calc = not pdf.empty
-        # if non_valid_calc:
-        #     states = pdf["status"].values
-        #     message = f"Candidate {candidate_id} has a non-failed " \
-        #     f"calculation of type {job_type} with status in " \
-        #     f"{states}. This calculation is therefore invalid."
-        #     raise RuntimeError(message)
-        # # --------------------------------------------------------------
-        #
-        # # --- Sanity checks against study object state -----------------
-        # study_obj = cand_row.df["study_obj"].values[0]
-        #
-        # if job_type == "bulk_relaxation":
-        #     # Test that termination and site indices are not provided:
-        #     if termination_index is not None or site_index is not None:
-        #         raise ValueError(
-        #             "bulk_relaxation does not use termination_index "
-        #             "or site_index."
-        #         )
-        #     # Test if the relaxed bulk already is set for the study:
-        #     if study_obj.get_bulk_atoms() is not None:
-        #         raise RuntimeError(
-        #             f"Candidate {candidate_id} already has a relaxed "
-        #             "bulk structure set. A new bulk_relaxation process "
-        #             "must not be created."
-        #         )
-        #
-        # elif job_type == "surface_relaxation":
-        #     # Test termination index is provided:
-        #     if termination_index is None:
-        #         raise ValueError(
-        #             "surface_relaxation requires termination_index."
-        #         )
-        #     # Test site index is not provided:
-        #     if site_index is not None:
-        #         raise ValueError(
-        #             "surface_relaxation does not use site_index."
-        #         )
-        #
-        #     # Test if surface study is initialized for the study:
-        #     surface_studies = study_obj.get_surface_studies()
-        #     if termination_index not in surface_studies:
-        #         raise ValueError(
-        #             "No initialized surface study exists for "
-        #             f"termination_index={termination_index}."
-        #         )
-        #
-        #     # Test if relaxed surface already is set for the study:
-        #     surface_study = surface_studies[termination_index]
-        #     if surface_study.base_surface_relaxed is not None:
-        #         raise RuntimeError(
-        #             "A relaxed surface is already set for "
-        #             f"termination_index={termination_index}. "
-        #             "A new surface_relaxation process must not be "
-        #             "created."
-        #         )
-        #
-        # elif job_type in ["O_adsorption", "OH_adsorption"]:
-        #
-        #     # Test that termination index is provided:
-        #     if termination_index is None:
-        #         raise ValueError(
-        #             f"{job_type} requires termination_index."
-        #         )
-        #
-        #     # Test that site index is provided:
-        #     if site_index is None:
-        #         raise ValueError(
-        #             f"{job_type} requires site_index."
-        #         )
-        #
-        #     # Test if surface study is initialized for the study:
-        #     surface_studies = study_obj.get_surface_studies()
-        #     if termination_index not in surface_studies:
-        #         raise ValueError(
-        #             "No initialized surface study exists for "
-        #             f"termination_index={termination_index}."
-        #         )
-        #     surface_study = surface_studies[termination_index]
-        #
-        #     # Test if ad-site study is initialized for the study:
-        #     adsite_studies = surface_study.\
-        #         get_adsorption_site_studies_dict()
-        #     if site_index not in adsite_studies:
-        #         raise ValueError(
-        #             "No initialized adsorption-site study exists for "
-        #             f"site_index={site_index} on "
-        #             f"termination_index={termination_index}."
-        #         )
-        #     ad_study = adsite_studies[site_index]
-        #
-        #     if job_type == "O_adsorption" and \
-        #             ad_study.relaxed_O_atoms is not None:
-        #         raise RuntimeError(
-        #             "A relaxed O structure has already been accepted "
-        #             f"for site_index={site_index} on "
-        #             f"termination_index={termination_index}. "
-        #             "A new O_adsorption process must not be created."
-        #         )
-        #
-        # # --------------------------------------------------------------
-        # DEPRECATED SANITY CHECKS END
 
         ad_study = validation_result.context.get("ad_study")
         if job_type in ["O_adsorption", "OH_adsorption"] and \
@@ -341,10 +205,7 @@ class Job_handler():
         # For bulk relaxation, enumerate magnetic configs and create one
         # process per config. Configs are stored once on the study object.
         if job_type == "bulk_relaxation":
-            # TODO - is validation_result.context.get("study_obj") the best and
-            # most clear way of getting the study object here? Check this when
-            # writing integration tests.
-            study_obj = validation_result.context.get("study_obj")
+            study_obj = self.rframe.candidates[candidate_id].df["study_obj"].values[0]
             configs = enumerate_magnetic_structures(
                 study_obj.get_init_structure(), self.magnetic_bulk_n_max
             )
@@ -451,8 +312,6 @@ class Job_handler():
             config = configs[mag_idx]
             # config['structure'] already has site_properties['magmom'] set by
             # enumerate_magnetic_structures; VaspInputSet writes MAGMOM automatically.
-            # TODO - test that the correct magmoms and INCAR settings are written
-            # to the VASP files.
             self.calc_setup.bulk_relaxation(
                 structure=config["structure"], directory=calc_dir
             )
@@ -627,7 +486,7 @@ class Job_handler():
                     )
 
                 if partition == 'auto':
-                    # TODO, could make a smart auto-partition
+                    # NOTE, could make a smart auto-partition
                     if len(init_structure) < 100:
                         partition = 'xeon40el8'
                     else:
@@ -798,12 +657,6 @@ class Job_handler():
         surface_study.update_adsorption_energies()
         # Get updated df:
         ad_sites_df = surface_study.get_adsorption_sites_df()
-        
-        # NOTE: checks below should never be needed, as test is above.
-        # if ad_sites_df is None or len(ad_sites_df) == 0:
-        #     return None
-        # if "Site index" not in ad_sites_df.columns:
-        #     return None
 
         site_rows = ad_sites_df[ad_sites_df["Site index"] == site_idx]
         if site_rows.empty:
@@ -1077,20 +930,8 @@ class Job_handler():
                                 candt_id, termination_index, site_index
                             )
                             self._update_candidate_oer_metrics(candt_id)
-                        else:
-                            # NOTE:
                             # Keep OH process rows unchanged until the
-                            # full OH batch is terminal. Partial updates
-                            # here mostly expose O-only metrics and can
-                            # be misleading for OH process tracking.
-
-                            # self._update_process_oer_metrics(
-                            #     process_id,
-                            #     candt_id,
-                            #     termination_index,
-                            #     site_index,
-                            # )
-                            pass
+                            # full OH batch is terminal.
 
         else:
             r_pdf = self.rframe.processes.df.copy()
@@ -1173,6 +1014,16 @@ class Job_handler():
                 else:
                     try:
                         atoms = read_vasp_results(vasp_dir)[-1]
+                        energy = atoms.get_potential_energy()
+                        if np.isnan(energy):
+                            raise ValueError(
+                                "NaN energy from VASP result."
+                            )
+                        magmom = atoms.get_magnetic_moments().tolist()
+                        if np.any(np.isnan(magmom)):
+                            raise ValueError(
+                                "NaN magnetic moments from VASP result."
+                            )
                         clean_up_vasp_directory(vasp_dir)
                     except Exception:
                         self.rframe.processes.df.at[idx, 'status'] \
@@ -1195,7 +1046,7 @@ class Job_handler():
                                 )
                             if oh_batch_ready:
                                 self._update_oh_batch_process_oer_metrics(
-                                    candt_id, termination_index, 
+                                    candt_id, termination_index,
                                     site_index
                                 )
                                 self._update_candidate_oer_metrics(
@@ -1230,32 +1081,30 @@ class Job_handler():
                             f"Process {process_id}: bulk_relaxation "
                             "processNote is missing mag_config_index."
                         )
-                    energy = atoms.get_potential_energy()
-                    # Use actual post-relaxation VASP magmoms from the
-                    # atoms object (read from vasprun.xml). TODO --- make a pytest which actually reads some of the magmons in to a ""calculator"", NOTE we need to consider how this actually can be mocked in a production-relelistic way...
-                    magmom = atoms.get_magnetic_moments().tolist()
                     study.store_mag_bulk_candidate(
                         mag_idx, atoms, energy, magmom
                     )
                 else:
                     surface_studies = study.get_surface_studies()
                     surface_study = surface_studies[termination_index]
-                    
-                    if job_type == 'surface_relaxation':                            
+
+                    if job_type == 'surface_relaxation':
                         success = surface_study.\
-                            set_relaxed_base_surface(atoms)
+                            set_relaxed_base_surface(atoms, energy=energy)
                         if not success:
                             unrecoverable_reason = (
                                 "Relaxed surface dissociated and this" \
                                 " surface can therefore not be used " \
                                 "for adsorption studies."
                             )
-                    else:                                
+                    else:
                         ad_site_dict = surface_study.\
                             get_adsorption_site_studies_dict()
                         ad_study = ad_site_dict[site_index]
                         if job_type == 'O_adsorption':
-                            result = ad_study.set_relaxed_O_calc(atoms)
+                            result = ad_study.set_relaxed_O_calc(
+                                atoms, energy=energy
+                            )
                             if isinstance(result, tuple):
                                 success, message = result
                             else:
@@ -1268,7 +1117,9 @@ class Job_handler():
                                     "by study sanity checks."
                                 )
                         elif job_type == 'OH_adsorption':
-                            result = ad_study.set_relaxed_OH_calc(atoms)
+                            result = ad_study.set_relaxed_OH_calc(
+                                atoms, energies=[energy]
+                            )
                             if isinstance(result, tuple):
                                 success, message = result
                             else:
@@ -1300,20 +1151,8 @@ class Job_handler():
                                 candt_id, termination_index, site_index
                             )
                             self._update_candidate_oer_metrics(candt_id)
-                        else:
-                            # NOTE:
                             # Keep OH process rows unchanged until the
-                            # full OH batch is terminal. Partial updates
-                            # here mostly expose O-only metrics and can
-                            # be misleading for OH process tracking.
-
-                            # self._update_process_oer_metrics(
-                            #     process_id,
-                            #     candt_id,
-                            #     termination_index,
-                            #     site_index,
-                            # )
-                            pass
+                            # full OH batch is terminal.
                     continue
 
                 self.rframe.processes.df.at[idx, 'status'] = \
@@ -1337,20 +1176,8 @@ class Job_handler():
                             candt_id, termination_index, site_index
                         )
                         self._update_candidate_oer_metrics(candt_id)
-                    else:
-                        # NOTE:
                         # Keep OH process rows unchanged until the full
-                        # OH batch is terminal. This avoids writing
-                        # partial OH snapshots to process rows.
-
-                        # self._update_process_oer_metrics(
-                        #     process_id,
-                        #     candt_id,
-                        #     termination_index,
-                        #     site_index,
-                        # )
-                        pass
-
+                        # OH batch is terminal.
         return updates
 
     # ------------------------------------------------------------------

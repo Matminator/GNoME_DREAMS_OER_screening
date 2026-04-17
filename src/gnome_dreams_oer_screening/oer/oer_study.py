@@ -231,7 +231,9 @@ class OER_catalyst_study:
         return self._mag_bulk_batch_finalized
 
 
-    # TODO - Consider if this is the best behaviour return False - should it just be a rasing an error..
+    # Returns False when all bulk relaxations failed (no candidates stored).
+    # All process rows are already in terminal state in the process log —
+    # that is the correct and sufficient failure signal.
     def finalize_mag_bulk_batch(self) -> bool:
         """
         Pick the lowest-energy-per-atom magnetic candidate, set it as the
@@ -254,7 +256,18 @@ class OER_catalyst_study:
                 self._mag_bulk_candidates[i][1] / len(self._mag_bulk_candidates[i][0])
             ),
         )
-        best_atoms, _, best_magmom = self._mag_bulk_candidates[best_idx]
+        best_atoms, best_energy, best_magmom = self._mag_bulk_candidates[best_idx]
+
+        if np.isnan(best_energy):
+            raise ValueError(
+                f"Winning bulk candidate {best_idx} has NaN energy. "
+                "Check VASP convergence for this candidate."
+            )
+        if np.any(np.isnan(best_magmom)):
+            raise ValueError(
+                f"Winning bulk candidate {best_idx} has NaN magnetic moments. "
+                "Check VASP convergence for this candidate."
+            )
 
         # Calls the existing validated setter (checks atom count, symbols, tags):
         self._set_relaxed_structure(best_atoms)
@@ -274,7 +287,6 @@ class OER_catalyst_study:
         return list(self._bulk_magmom) if self._bulk_magmom is not None else None
 
 
-    # TODO LOOK THIS OVER: getattr ???
     def store_mag_bulk_configs(self, configs: list[dict]) -> None:
         """Store the enumerated initial magnetic configurations for this study.
         Called once from enter_process. Raises RuntimeError if configs are already
@@ -412,7 +424,7 @@ class OER_catalyst_study:
             break  # Surfaces were generated successfully; exit loop.
 
         # Removing slabs that contain too many atoms or are too thick.
-        # NOTE: could consider a more refined approach in the future.
+        # FUTURE-NOTE: could consider a more refined approach in the future.
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]
         slabs = [slab for slab in slabs if 
                     compute_slab_thickness(slab)
@@ -707,22 +719,6 @@ class OER_catalyst_study:
                 f"{termination_index}. No generated termination exists "
                 "for this index."
             )
-
-        # --- DEPRECATED CODE - WILL BE REMOVED IN THE FUTURE ----------
-
-        # # Do a sanity check if miller indices are provided:
-        # if miller_indices is not None:
-        #     # TODO: If `self.termination_ranking_df` is None here, raise
-        #     # a descriptive ValueError instructing the caller to run
-        #     # `predict_most_likely_surfaces(...)` first.
-        #     df = self.termination_ranking_df
-        #     millers_terminations_indecies = df[df['Miller indices'] ==
-        #                 miller_indices]['Termination index'].values
-        #     if termination_index not in millers_terminations_indecies:
-        #         raise ValueError("The provided termination_index does "\
-        #         "not correspond to the provided miller_indices.")
-
-        # --------------------------------------------------------------
 
         slab = self.terminations[termination_index]
         oer_surface_study = OER_surface_study(self, slab,

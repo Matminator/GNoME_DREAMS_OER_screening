@@ -211,10 +211,10 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
         "Lattice O (tag=3) must be absent from the lattice-O O calc structure"
     )
 
-    # --- oh_batch_finalized defaults to True --- # TODO... WHY IS THIS DEFAULT CONVENTIONALLY TRUE?
-    # Design: direct/manual workflows expose OH metrics immediately; Job_handler
-    # flips this to False when OH jobs are submitted and restores True when all 3
-    # OH processes reach terminal status.
+    # NOTE: oh_batch_finalized defaults to True by design.
+    # Direct/manual workflows (e.g. this test) expose OH metrics immediately.
+    # job_handler sets it to False when OH jobs are submitted and restores True
+    # when all 3 OH processes reach terminal status.
     assert on_top_study.is_oh_batch_finalized() == True, (
         "oh_batch_finalized should default to True (direct-workflow convention)"
     )

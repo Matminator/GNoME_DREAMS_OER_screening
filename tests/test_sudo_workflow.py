@@ -369,6 +369,32 @@ def test_simple_sudo_workflow(tmp_path, TiO2_r_bulk):
     assert np.isfinite(float(candidate_row.idealOverPotential))
     assert np.isfinite(float(candidate_row.Overpotential_from_scaling))
 
+    # Exactly one of the 3 OH process rows must carry OER metrics;
+    # the other two must remain NaN (_update_oh_batch_process_oer_metrics
+    # populates only the first completed row).
+    pdf = EXPLOG.relational_frame.processes.df
+    oh_rows = pdf[
+        (pdf["candidate_id"] == cant_id)
+        & (pdf["job_type"] == "OH_adsorption")
+        & (pdf["termination_index"] == termination_index)
+        & (pdf["site_index"] == on_top_idx)
+    ]
+    assert len(oh_rows) == 3
+    populated   = oh_rows[oh_rows["G(OH)"].notna()]
+    unpopulated = oh_rows[oh_rows["G(OH)"].isna()]
+    assert len(populated) == 1, (
+        f"Exactly 1 OH process row must carry G(OH), got {len(populated)}"
+    )
+    assert len(unpopulated) == 2, (
+        "The other 2 OH process rows must have NaN G(OH)"
+    )
+    assert populated.iloc[0]["status"] == "completed", (
+        "The populated OH row must be the completed one"
+    )
+    assert np.isfinite(float(populated.iloc[0]["ideal overpotential"])), (
+        "Populated OH row must have finite ideal overpotential"
+    )
+
     # =========================================================================
     # Stage D — OH_adsorption for lattice-O site (submitted BEFORE O_adsorption)
     # lattice-O OH does not require prior O_adsorption — OH is initialized

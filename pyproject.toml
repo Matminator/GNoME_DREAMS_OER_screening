@@ -44,6 +44,7 @@ filterwarnings = [
     "ignore:Elements in POSCAR would be overwritten:UserWarning:pymatgen.*",
     "ignore:Too many sites removed, please use a larger slab:UserWarning:pymatgen.*",
     "ignore:ISMEAR = 0 with a small SIGMA:UserWarning:pymatgen.*",
+    "ignore:ISMEAR = 0 with a small SIGMA:pymatgen.io.vasp.sets.BadInputSetWarning",
 ]
 
 markers = [

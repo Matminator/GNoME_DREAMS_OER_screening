@@ -447,3 +447,25 @@ def test_get_bulk_magmom_returns_copy():
     magmom = study.get_bulk_magmom()
     magmom[0] = 999.0
     assert study.get_bulk_magmom()[0] != 999.0
+
+
+# ---------------------------------------------------------------------------
+# finalize_mag_bulk_batch — NaN guards (§2b)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_raises_on_nan_energy():
+    """NaN DFT energy must raise ValueError before any state is mutated."""
+    study, atoms = _make_study()
+    study.store_mag_bulk_candidate(0, atoms.copy(), float("nan"), [0.0])
+    with pytest.raises(ValueError, match="NaN energy"):
+        study.finalize_mag_bulk_batch()
+
+
+@pytest.mark.mini
+def test_finalize_mag_bulk_batch_raises_on_nan_magmom():
+    """NaN magnetic moments must raise ValueError before any state is mutated."""
+    study, atoms = _make_study()
+    study.store_mag_bulk_candidate(0, atoms.copy(), -1.0, [float("nan")])
+    with pytest.raises(ValueError, match="NaN magnetic moments"):
+        study.finalize_mag_bulk_batch()

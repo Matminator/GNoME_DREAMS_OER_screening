@@ -68,6 +68,30 @@ def test_bulk_kpoints_density_formula():
     )
 
 
+def test_surface_set_magmom_written_from_site_properties():
+    """Surface INCAR MAGMOM must match structure.site_properties['magmom'].
+
+    Same VaspInputSet mechanism as the bulk set — requires 'MAGMOM' key in
+    CONFIG (empty dict) for pymatgen 2025.x to pick up site magmoms.
+    """
+    structure = Structure(
+        Lattice.from_parameters(a=3.0, b=3.0, c=20.0,
+                                alpha=90, beta=90, gamma=90),
+        ["Fe", "Fe"],
+        [[0, 0, 0.1], [0.5, 0.5, 0.5]],
+    )
+    structure.add_site_property("magmom", [5.0, -5.0])
+    surface_set = RPBE_relax_surface_set(structure)
+    incar = surface_set.incar
+    assert "MAGMOM" in incar, (
+        "INCAR must contain MAGMOM when site_properties['magmom'] is set and ISPIN=2"
+    )
+    magmoms = incar["MAGMOM"]
+    assert len(magmoms) == 2
+    assert magmoms[0] == pytest.approx(5.0, abs=1e-6)
+    assert magmoms[1] == pytest.approx(-5.0, abs=1e-6)
+
+
 def test_surface_kpoints_one_in_vacuum_direction():
     """Surface KPOINTS must have exactly 1 k-point in the c (vacuum) direction.
 

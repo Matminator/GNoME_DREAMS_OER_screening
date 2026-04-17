@@ -68,6 +68,25 @@ needs_enumlib = pytest.mark.skipif(
 )
 
 
+def _potcars_available() -> bool:
+    """Return True if pymatgen's PMG_VASP_PSP_DIR is configured."""
+    import os
+    try:
+        from pymatgen.core import SETTINGS
+        return bool(
+            SETTINGS.get("PMG_VASP_PSP_DIR")
+            or os.environ.get("PMG_VASP_PSP_DIR")
+        )
+    except Exception:
+        return bool(os.environ.get("PMG_VASP_PSP_DIR"))
+
+
+needs_potcars = pytest.mark.skipif(
+    not _potcars_available(),
+    reason="PMG_VASP_PSP_DIR not configured — POTCAR lookup unavailable",
+)
+
+
 # ---------------------------------------------------------------------------
 # Production-mode infrastructure: fake VASP result reader + mock helpers
 # ---------------------------------------------------------------------------
@@ -710,6 +729,7 @@ def test_bulk_pipeline_non_magnetic_al(tmp_path, al_fcc_atoms):
 # ---------------------------------------------------------------------------
 
 @needs_enumlib
+@needs_potcars
 def test_production_mode_full_pipeline_fe(tmp_path, fe_bcc_atoms, monkeypatch):
     """Production-mode full pipeline: bulk → surface → O → OH (BCC Fe, magnetic).
 
@@ -877,6 +897,7 @@ def test_production_mode_full_pipeline_fe(tmp_path, fe_bcc_atoms, monkeypatch):
 
 
 @needs_enumlib
+@needs_potcars
 def test_production_mode_full_pipeline_al_nm(tmp_path, al_fcc_atoms, monkeypatch):
     """Production-mode pipeline for Al FCC: validates all-zero magmoms are accepted.
 
@@ -960,6 +981,7 @@ def test_production_mode_full_pipeline_al_nm(tmp_path, al_fcc_atoms, monkeypatch
 
 
 @needs_enumlib
+@needs_potcars
 def test_production_mode_unrecoverable_surface_fe(tmp_path, fe_bcc_atoms,
                                                    monkeypatch):
     """Disconnected slab is marked unrecoverable, not silently completed (BCC Fe).

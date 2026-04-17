@@ -175,10 +175,12 @@ class OER_surface_study:
             structure (if possible). Default is None.
         require_magmom: bool
             If True (default), raises ValueError when no magnetic moments
-            can be extracted from the surface (no calculator attached or all
-            moments are zero). This is the expected behaviour in any real
-            workflow: a VASP-relaxed surface always carries a calculator with
-            converged magnetic moments.
+            can be extracted from the surface (no calculator attached).
+            All-zero magmoms are valid and accepted — non-magnetic materials
+            (e.g. IrO₂, RuO₂) return [0.0, ...] from VASP and must not be
+            rejected. This is the expected behaviour in any real workflow: a
+            VASP-relaxed surface always carries a calculator with converged
+            magnetic moments.
             Set to False ONLY in unit tests or fake-result modes where no
             real VASP calculator is attached. In that case _relaxed_surface_magmom
             is left as None and get_relaxed_surface_magmom() returns None.

@@ -513,10 +513,10 @@ def test_magnetic_pipeline_fe(tmp_path, fe_bcc_atoms):
 @needs_enumlib
 @_needs_traj
 def test_magnetic_pipeline_Fe2Ir2O12Rh2(tmp_path, gnome_Fe2Ir2O12Rh2_atoms):
-    """End-to-end pipeline for GNoME Fe2Ir2O12Rh2 (Fe and Rh magnetic)."""
+    """End-to-end pipeline for GNoME Fe2Ir2O12Rh2 (Fe and Rh magnetic, 2 orderings)."""
     _run_magnetic_bulk_pipeline(
         gnome_Fe2Ir2O12Rh2_atoms,
-        n_expected=4,  # capped at n_max=4; verify on first run
+        n_expected=2,
         tmp_path=tmp_path,
     )
 
@@ -524,21 +524,22 @@ def test_magnetic_pipeline_Fe2Ir2O12Rh2(tmp_path, gnome_Fe2Ir2O12Rh2_atoms):
 @needs_enumlib
 @_needs_traj
 def test_magnetic_pipeline_IrO4Pd(tmp_path, gnome_IrO4Pd_atoms):
-    """End-to-end pipeline for GNoME IrO4Pd."""
+    """End-to-end pipeline for GNoME IrO4Pd (NM fallback — not detected as magnetic)."""
     _run_magnetic_bulk_pipeline(
         gnome_IrO4Pd_atoms,
-        n_expected=4,  # capped at n_max=4; verify on first run
+        n_expected=1,
         tmp_path=tmp_path,
+        is_magnetic=False,
     )
 
 
 @needs_enumlib
 @_needs_traj
 def test_magnetic_pipeline_Ag3BiCoIr3O14(tmp_path, gnome_Ag3BiCoIr3O14_atoms):
-    """End-to-end pipeline for GNoME Ag3BiCoIr3O14 (Co magnetic)."""
+    """End-to-end pipeline for GNoME Ag3BiCoIr3O14 (Co magnetic, FM only — 1 ordering)."""
     _run_magnetic_bulk_pipeline(
         gnome_Ag3BiCoIr3O14_atoms,
-        n_expected=4,  # capped at n_max=4; verify on first run
+        n_expected=1,
         tmp_path=tmp_path,
     )
 

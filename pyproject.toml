@@ -43,6 +43,7 @@ filterwarnings = [
     "ignore:Not all sites have property wyckoff:UserWarning:pymatgen.*",
     "ignore:Elements in POSCAR would be overwritten:UserWarning:pymatgen.*",
     "ignore:Too many sites removed, please use a larger slab:UserWarning:pymatgen.*",
+    "ignore:ISMEAR = 0 with a small SIGMA:UserWarning:pymatgen.*",
 ]
 
 markers = [

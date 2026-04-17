@@ -34,7 +34,8 @@ from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
 
 pytestmark = pytest.mark.mini
 
-_TRAJ = Path(__file__).parent / "test_cands.traj"
+_TRAJ = Path(__file__).parent.parent / "notebooks" / "test_cands.traj"
+_needs_traj = pytest.mark.skipif(not _TRAJ.exists(), reason="test_cands.traj not found")
 
 
 def _enumlib_available() -> bool:
@@ -87,9 +88,11 @@ def gnome_Ag3BiCoIr3O14_atoms():
 
 
 @pytest.fixture(scope="module")
-def cu_fcc_atoms():
-    """FCC Cu — non-magnetic (triggers NM fallback in enumerate_magnetic_structures)."""
-    return bulk('Cu', 'fcc', a=3.61, cubic=True)
+def al_fcc_atoms():
+    """FCC Al — non-magnetic (Al is not in pymatgen's magnetic elements list,
+    so MagneticStructureEnumerator raises 'Not detected as magnetic' and
+    enumerate_magnetic_structures returns a single NM fallback entry)."""
+    return bulk('Al', 'fcc', a=4.05, cubic=True)
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +511,7 @@ def test_magnetic_pipeline_fe(tmp_path, fe_bcc_atoms):
 
 
 @needs_enumlib
+@_needs_traj
 def test_magnetic_pipeline_Fe2Ir2O12Rh2(tmp_path, gnome_Fe2Ir2O12Rh2_atoms):
     """End-to-end pipeline for GNoME Fe2Ir2O12Rh2 (Fe and Rh magnetic)."""
     _run_magnetic_bulk_pipeline(
@@ -518,6 +522,7 @@ def test_magnetic_pipeline_Fe2Ir2O12Rh2(tmp_path, gnome_Fe2Ir2O12Rh2_atoms):
 
 
 @needs_enumlib
+@_needs_traj
 def test_magnetic_pipeline_IrO4Pd(tmp_path, gnome_IrO4Pd_atoms):
     """End-to-end pipeline for GNoME IrO4Pd."""
     _run_magnetic_bulk_pipeline(
@@ -528,6 +533,7 @@ def test_magnetic_pipeline_IrO4Pd(tmp_path, gnome_IrO4Pd_atoms):
 
 
 @needs_enumlib
+@_needs_traj
 def test_magnetic_pipeline_Ag3BiCoIr3O14(tmp_path, gnome_Ag3BiCoIr3O14_atoms):
     """End-to-end pipeline for GNoME Ag3BiCoIr3O14 (Co magnetic)."""
     _run_magnetic_bulk_pipeline(
@@ -538,15 +544,17 @@ def test_magnetic_pipeline_Ag3BiCoIr3O14(tmp_path, gnome_Ag3BiCoIr3O14_atoms):
 
 
 @needs_enumlib
-def test_bulk_pipeline_non_magnetic_cu(tmp_path, cu_fcc_atoms):
-    """NM fallback path: Cu FCC is non-magnetic.
+def test_bulk_pipeline_non_magnetic_al(tmp_path, al_fcc_atoms):
+    """NM fallback path: Al FCC is non-magnetic.
 
-    MagneticStructureEnumerator raises 'Not detected as magnetic' for Cu,
-    so enumerate_magnetic_structures returns exactly 1 NM fallback config
+    Al is not in pymatgen's magnetic elements list, so
+    MagneticStructureEnumerator raises 'Not detected as magnetic' and
+    enumerate_magnetic_structures returns exactly 1 NM fallback config
     with magmoms ≈ 0.6. The full pipeline must complete correctly.
+    Note: Cu IS in the magnetic elements list and was deliberately not used.
     """
     _run_magnetic_bulk_pipeline(
-        cu_fcc_atoms,
+        al_fcc_atoms,
         n_expected=1,
         tmp_path=tmp_path,
         is_magnetic=False,

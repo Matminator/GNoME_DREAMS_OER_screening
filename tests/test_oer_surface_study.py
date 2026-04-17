@@ -269,6 +269,103 @@ def test_update_adsorption_energies_does_not_compute_overpotential_without_oh(
     assert pd.isna(row["overpotential from OH-OOH scaling relation"])
 
 
+def test_g_oh_formula_reference_value(TiO2_r_init_surface_study):
+    """G(OH) formula numerical verification against a hand-computed reference.
+
+    Reference values (TiO2 fixture: H2=-6.77, H2O=-14.217, OH_corr=0.361,
+    slab_energy=-278.135):
+        G(OH) = ΔE_OH + OH_corr + G_H - G_H₂O
+              = ΔE_OH + 0.361 + (-3.385) - (-14.217) = ΔE_OH + 11.193
+        For G(OH)=1.23: ΔE_OH = -9.963 → E(slab+OH) = -288.098
+    """
+    surface_study, _, _ = TiO2_r_init_surface_study
+    surface_study = copy.deepcopy(surface_study)
+
+    df = surface_study.get_adsorption_sites_df()
+    on_top_idx = int(df[df["site type"] == "on-top"]["Site index"].iloc[0])
+    surface_study.initialize_adsorption_site_study(on_top_idx)
+    ad_study = surface_study.get_adsorption_site_studies_dict()[on_top_idx]
+
+    ad_study.set_relaxed_O_calc(
+        ad_study.get_atoms_for_O_calc(), energy=-283.192, require_magmom=False
+    )
+    oh_init_atoms = ad_study.get_OH_adsorbed_atoms()
+    ad_study.set_relaxed_OH_calc(oh_init_atoms, energies=[-288.098] * 3)
+
+    surface_study.update_adsorption_energies()
+    row = surface_study.get_adsorption_sites_df().loc[on_top_idx]
+
+    assert row["G(OH)"] == pytest.approx(1.23, abs=1e-5)
+    assert row["G(OH) deviation"] == pytest.approx(0.0, abs=1e-5)
+
+
+def test_overpotentials_at_ideal_scaling_point(TiO2_r_init_surface_study):
+    """Overpotential formulas verified at the ideal scaling point G(O)=2.46, G(OH)=1.23.
+
+    At ideal scaling all four elementary steps are equal (1.23 eV each), so:
+        ideal_overpotential                  = 0.00 V
+        G(OOH) from scaling (b=3.2)          = 4.43 eV
+        G(OOH, scaling) deviation            = |4.43 - 3.69| = 0.74 eV
+        overpotential from scaling relation  = 0.74 V  (step 3 limits: ΔG₃=1.97)
+    """
+    surface_study, _, _ = TiO2_r_init_surface_study
+    surface_study = copy.deepcopy(surface_study)
+
+    df = surface_study.get_adsorption_sites_df()
+    on_top_idx = int(df[df["site type"] == "on-top"]["Site index"].iloc[0])
+    surface_study.initialize_adsorption_site_study(on_top_idx)
+    ad_study = surface_study.get_adsorption_site_studies_dict()[on_top_idx]
+
+    ad_study.set_relaxed_O_calc(
+        ad_study.get_atoms_for_O_calc(), energy=-283.192, require_magmom=False
+    )
+    oh_init_atoms = ad_study.get_OH_adsorbed_atoms()
+    ad_study.set_relaxed_OH_calc(oh_init_atoms, energies=[-288.098] * 3)
+
+    surface_study.update_adsorption_energies()
+    row = surface_study.get_adsorption_sites_df().loc[on_top_idx]
+
+    assert row["G(O)"]  == pytest.approx(2.46, abs=1e-5)
+    assert row["G(OH)"] == pytest.approx(1.23, abs=1e-5)
+    assert row["ideal overpotential"] == pytest.approx(0.00, abs=1e-5)
+    assert row["G(OOH) from scaling relation"] == pytest.approx(4.43, abs=1e-5)
+    assert row["G(OOH, scaling) deviation"] == pytest.approx(0.74, abs=1e-5)
+    assert row["overpotential from OH-OOH scaling relation"] == pytest.approx(0.74, abs=1e-5)
+
+
+def test_overpotentials_non_ideal_step2_limiting(TiO2_r_init_surface_study):
+    """Overpotential formulas at a non-ideal point where different steps limit ideal vs scaling.
+
+    G(O)=2.0, G(OH)=0.5, b=3.2:
+        ideal:   max(0.5, 1.5, 1.46) - 1.23 = 0.27 V  (step 2 = ΔG_OH→O limits)
+        scaling: G(OOH)=3.7, max(0.5, 1.5, 1.7, 1.22) - 1.23 = 0.47 V (step 3 limits)
+
+    Reference energies:
+        E_O  = -278.135 + (2.0  - 7.517) = -283.652
+        E_OH = -278.135 + (0.5  - 11.193) = -288.828
+    """
+    surface_study, _, _ = TiO2_r_init_surface_study
+    surface_study = copy.deepcopy(surface_study)
+
+    df = surface_study.get_adsorption_sites_df()
+    on_top_idx = int(df[df["site type"] == "on-top"]["Site index"].iloc[0])
+    surface_study.initialize_adsorption_site_study(on_top_idx)
+    ad_study = surface_study.get_adsorption_site_studies_dict()[on_top_idx]
+
+    ad_study.set_relaxed_O_calc(
+        ad_study.get_atoms_for_O_calc(), energy=-283.652, require_magmom=False
+    )
+    oh_init_atoms = ad_study.get_OH_adsorbed_atoms()
+    ad_study.set_relaxed_OH_calc(oh_init_atoms, energies=[-288.828] * 3)
+
+    surface_study.update_adsorption_energies()
+    row = surface_study.get_adsorption_sites_df().loc[on_top_idx]
+
+    assert row["G(O)"]  == pytest.approx(2.00, abs=1e-5)
+    assert row["G(OH)"] == pytest.approx(0.50, abs=1e-5)
+    assert row["ideal overpotential"] == pytest.approx(0.27, abs=1e-5)
+    assert row["overpotential from OH-OOH scaling relation"] == pytest.approx(0.47, abs=1e-5)
+
 
 def test_adsorbtion_sites_dict(TiO2_r_init_surface_study):
     surface_study, df, df_relaxed = TiO2_r_init_surface_study

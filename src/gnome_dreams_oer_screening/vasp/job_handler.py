@@ -1024,13 +1024,31 @@ class Job_handler():
                         surface_so = surface_studies[termination_index]
                         
                         if job_type == 'surface_relaxation':
-                            surface_so.set_relaxed_base_surface(atoms, E)
+                            # Test-mode atoms carry no VASP calculator;
+                            # require_magmom=False avoids ValueError.
+                            # Slab magmoms (bulk-derived, site_properties)
+                            # are unaffected — they propagate via
+                            # get_slab_magmom(), not _relaxed_surface_magmom.
+                            surface_so.set_relaxed_base_surface(
+                                atoms, E, require_magmom=False
+                            )
                         else:
                             ad_site_dict = surface_so.\
                                 get_adsorption_site_studies_dict()
                             ad_study = ad_site_dict[site_index]
                             if job_type == 'O_adsorption':
                                 ad_study.set_relaxed_O_calc(atoms, E)
+                                # Test-mode atoms carry no VASP calculator so
+                                # _relaxed_O_magmom stays None after the call
+                                # above. Inject the initial O magmom so that
+                                # get_OH_init_magmom (on-top sites) is
+                                # exercisable in test mode. Mirrors the
+                                # bulk_relaxation fix (_get_config_magmom).
+                                if ad_study._relaxed_O_magmom is None:
+                                    _slab_m = surface_so.get_slab_magmom()
+                                    if _slab_m is not None:
+                                        ad_study._relaxed_O_magmom = \
+                                            ad_study.get_O_init_magmom(_slab_m)
                             elif job_type == 'OH_adsorption':
                                 ad_study.set_relaxed_OH_calc(
                                     atoms, energies=[E]

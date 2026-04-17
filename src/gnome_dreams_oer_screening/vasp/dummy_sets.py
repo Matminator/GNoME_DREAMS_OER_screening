@@ -13,6 +13,7 @@ def get_dummy_settings():
         "ISIF": 3,
         "ISMEAR": 0,
         "ISPIN": 2,
+        "MAGMOM": {},
         "LASPH": True,
         "LDAU": True,
         "LDAUJ": {

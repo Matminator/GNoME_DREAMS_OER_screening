@@ -756,13 +756,18 @@ class Job_handler():
             & (pdf["site_index"] == site_idx)
         ]
 
-        for process_id in oh_rows["process_id"].tolist():
-            self._update_process_oer_metrics(
-                process_id,
-                candidate_id,
-                termination_index,
-                site_index,
-            )
+        # Populate only the first completed row; leave the others unpopulated.
+        completed_ids = oh_rows.loc[
+            oh_rows["status"] == "completed", "process_id"
+        ]
+        if completed_ids.empty:
+            return
+        self._update_process_oer_metrics(
+            completed_ids.iloc[0],
+            candidate_id,
+            termination_index,
+            site_index,
+        )
 
     def _refresh_oh_batch_finalization_state(
         self,

@@ -63,8 +63,8 @@ def test_bulk_kpoints_density_formula():
     kpts = bulk_set.CONFIG["KPOINTS"]
 
     expected = math.ceil(50 / 3.0)  # = 17
-    assert kpts.kpts[0] == [expected, expected, expected], (
-        f"Expected [{expected},{expected},{expected}], got {kpts.kpts[0]}"
+    assert tuple(kpts.kpts[0]) == (expected, expected, expected), (
+        f"Expected ({expected},{expected},{expected}), got {kpts.kpts[0]}"
     )
 
 

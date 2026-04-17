@@ -12,6 +12,7 @@ def get_RPBE_bulk_settings():
         "ISIF": 3,
         "ISMEAR": 0,
         "ISPIN": 2,
+        "MAGMOM": {},
         "LASPH": True,
         "LDAU": True,
         "LDAUJ": {
@@ -150,6 +151,7 @@ def get_RPBE_surface_settings():
         "ISIF": 0,
         "ISMEAR": 0,
         "ISPIN": 2,
+        "MAGMOM": {},
         "LASPH": True,
         "LDAU": True,
         "LDAUJ": {

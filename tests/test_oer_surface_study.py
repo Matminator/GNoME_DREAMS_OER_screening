@@ -11,10 +11,16 @@ from ase import Atoms
 from ase.io import read
 
 # --- IMPORTS FROM THIS PROJECT ---
+import math
+
+from pymatgen.io.ase import AseAtomsAdaptor
+
 from gnome_dreams_oer_screening import (
     OER_catalyst_study,
     OER_adsorption_site_study,
+    RPBE_relax_surface_set,
 )
+from gnome_dreams_oer_screening.oer.oer_study_utils import compute_slab_thickness
 from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
 )
@@ -839,3 +845,43 @@ def test_magmom_propagates_gnome_Ag3BiCoIr3O14_co_only_magnetic():
             f"Co atoms in slab have near-zero magmom: {co_magmoms} — "
             "expected non-trivial value from FM enumeration"
         )
+
+
+def test_pipeline_slab_kpoints_vacuum_direction(TiO2_r_init_surface_study):
+    """Surface KPOINTS from a real pipeline slab must have k_c=1 and c must be the
+    vacuum direction (verified by comparing slab atom thickness to cell c-length).
+
+    Checks:
+    1. The c-direction of the slab cell contains substantial vacuum (> 5 Å).
+    2. RPBE_relax_surface_set applied to that slab produces KPOINTS with k_c = 1.
+    3. In-plane k-points (a, b) match the ceil(30/lattice_param) formula.
+    """
+    surface_study, _, _ = TiO2_r_init_surface_study
+    atoms = surface_study.get_non_relaxed_surface()  # ASE Atoms with vacuum along c
+
+    # Confirm c is the vacuum direction
+    cell = atoms.get_cell()
+    c_vec = cell[2, :]
+    c_length = np.linalg.norm(c_vec)
+    c_normal = c_vec / c_length
+
+    thickness = compute_slab_thickness(atoms, normal_vector=c_normal)
+    vacuum = c_length - thickness
+    assert vacuum > 5.0, (
+        f"Expected > 5 Å vacuum in the c-direction, got {vacuum:.2f} Å. "
+        "If this fails the slab is not oriented with vacuum along c."
+    )
+
+    # Check KPOINTS
+    structure = AseAtomsAdaptor.get_structure(atoms)
+    surface_set = RPBE_relax_surface_set(structure)
+    kpts = surface_set.CONFIG["KPOINTS"]
+
+    k_a, k_b, k_c = kpts.kpts[0]
+    assert k_c == 1, (
+        f"Surface KPOINTS must have 1 k-point in the vacuum (c) direction, got {k_c}"
+    )
+    a_len = np.linalg.norm(cell[0, :])
+    b_len = np.linalg.norm(cell[1, :])
+    assert k_a == math.ceil(30 / a_len), f"k_a mismatch: expected {math.ceil(30 / a_len)}, got {k_a}"
+    assert k_b == math.ceil(30 / b_len), f"k_b mismatch: expected {math.ceil(30 / b_len)}, got {k_b}"

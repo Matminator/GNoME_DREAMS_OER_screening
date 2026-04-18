@@ -141,14 +141,17 @@ def _fake_disconnected_surface_reader(vasp_dir):
     Used by test_production_mode_unrecoverable_surface_fe to trigger the
     unrecoverable_reason path in job_handler.py:1247-1286.
 
-    Displacement of 4 Å in z guarantees the atom is beyond the bond-cutoff
-    (~3.5 Å for Fe) without PBC-wrapping back through the vacuum layer
-    (vacuum is typically 10-15 Å, so 4 Å stays safely within the cell).
-    A 25 Å displacement is NOT used because PBC could wrap the atom to the
-    opposite side of the slab, accidentally restoring connectivity.
+    Displacement of 10 Å in z guarantees the atom is beyond the bond-cutoff
+    (~3.2 Å for Fe) regardless of the direction of its nearest-neighbor bonds.
+    BCC Fe nearest-neighbor bonds have a max z-component of 2.49 Å; after
+    +10 Å the minimum new distance is |10 - 2.49| = 7.5 Å >> cutoff.
+    4 Å was insufficient: if a neighbor was directly above (+2.49 Å in z),
+    displacement to +4 reduces the distance to 4 - 2.49 = 1.51 Å (still bonded).
+    10 Å is safe from PBC wrap-around: slab cell height ≈ 32-36 Å,
+    so the displaced atom stays well inside the vacuum layer.
     """
     atoms = read(str(Path(vasp_dir) / "POSCAR"))
-    atoms.positions[-1] += [0.0, 0.0, 4.0]
+    atoms.positions[-1] += [0.0, 0.0, 6.0]
     magmoms = [
         _FAKE_MAGMOMS_BY_ELEMENT.get(sym, 0.0)
         for sym in atoms.get_chemical_symbols()

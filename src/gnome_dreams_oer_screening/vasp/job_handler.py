@@ -312,10 +312,11 @@ class Job_handler():
                     "enter_process must be called before submit_vasp_calculation."
                 )
             config = configs[mag_idx]
+            init_structure = config["structure"]
             # config['structure'] already has site_properties['magmom'] set by
             # enumerate_magnetic_structures; VaspInputSet writes MAGMOM automatically.
             self.calc_setup.bulk_relaxation(
-                structure=config["structure"], directory=calc_dir
+                structure=init_structure, directory=calc_dir
             )
 
         elif job_type in ["surface_relaxation", "O_adsorption", 

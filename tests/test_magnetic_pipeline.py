@@ -138,20 +138,24 @@ def _default_fake_read_vasp_results(vasp_dir):
 def _fake_disconnected_surface_reader(vasp_dir):
     """Fake reader that displaces one slab atom to break connectivity.
 
-    Used by test_production_mode_unrecoverable_surface_fe to trigger the
-    unrecoverable_reason path in job_handler.py:1247-1286.
-
-    Displacement of 10 Å in z guarantees the atom is beyond the bond-cutoff
-    (~3.2 Å for Fe) regardless of the direction of its nearest-neighbor bonds.
-    BCC Fe nearest-neighbor bonds have a max z-component of 2.49 Å; after
-    +10 Å the minimum new distance is |10 - 2.49| = 7.5 Å >> cutoff.
-    4 Å was insufficient: if a neighbor was directly above (+2.49 Å in z),
-    displacement to +4 reduces the distance to 4 - 2.49 = 1.51 Å (still bonded).
-    10 Å is safe from PBC wrap-around: slab cell height ≈ 32-36 Å,
-    so the displaced atom stays well inside the vacuum layer.
+    Displacement is 10 Å along the surface-normal unit vector (atoms.cell[2]
+    normalised). For pymatgen slabs, cell[2] is always the surface-normal
+    direction regardless of Miller index. For BCC Fe(110), cell[2] points
+    along [1,1,0] (not Cartesian z), so a fixed Cartesian displacement like
+    [0,0,10] moves the atom in-plane and wraps through the small in-plane
+    PBC cell (~2.87 Å), leaving the atom bonded.
+    10 Å along the true normal exceeds the Fe-Fe bond cutoff (~3.2 Å):
+    the maximum normal-direction bond component is 2.03 Å (BCC nn bond along
+    [1,1,0] projected onto the [1,1,0] normal), giving a minimum new
+    distance of 10 - 2.03 = 7.97 Å. The vacuum layer is 14 Å per side,
+    so the atom stays well inside the vacuum and does not wrap via PBC.
     """
     atoms = read(str(Path(vasp_dir) / "POSCAR"))
-    atoms.positions[-1] += [6.0, 6.0, 6.0]
+    c = atoms.cell[2]
+    c_hat = c / np.linalg.norm(c)
+    pos = atoms.get_positions()
+    pos[-1] += 10.0 * c_hat
+    atoms.set_positions(pos)
     magmoms = [
         _FAKE_MAGMOMS_BY_ELEMENT.get(sym, 0.0)
         for sym in atoms.get_chemical_symbols()

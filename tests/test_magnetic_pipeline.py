@@ -136,26 +136,33 @@ def _default_fake_read_vasp_results(vasp_dir):
 
 
 def _fake_disconnected_surface_reader(vasp_dir):
-    """Fake reader that displaces one slab atom to break connectivity.
+    """Fake reader that displaces one slab atom into the centre of the vacuum.
 
-    Displacement is 10 Å along the surface-normal unit vector (atoms.cell[2]
-    normalised). For pymatgen slabs, cell[2] is always the surface-normal
-    direction regardless of Miller index. For BCC Fe(110), cell[2] points
-    along [1,1,0] (not Cartesian z), so a fixed Cartesian displacement like
-    [0,0,10] moves the atom in-plane and wraps through the small in-plane
-    PBC cell (~2.87 Å), leaving the atom bonded.
-    10 Å along the true normal exceeds the Fe-Fe bond cutoff (~3.2 Å):
-    the maximum normal-direction bond component is 2.03 Å (BCC nn bond along
-    [1,1,0] projected onto the [1,1,0] normal), giving a minimum new
-    distance of 10 - 2.03 = 7.97 Å. The vacuum layer is 14 Å per side,
-    so the atom stays well inside the vacuum and does not wrap via PBC.
+    Positions the last slab atom at the midpoint between the top of the slab
+    and its periodic image at the bottom (i.e. the centre of the vacuum gap).
+    This is always vacuum/2 = 6 Å from the nearest slab atom (vacuum=12 Å),
+    well above the Fe-Fe bond cutoff (~3.2 Å), and never wraps via PBC
+    regardless of slab thickness or Miller index.
+
+    Earlier approaches used a fixed Cartesian or cell[2]-aligned displacement:
+    - [0,0,10] is in-plane for BCC(110) (cell[2] ∥ [1,1,0]) and wraps through
+      the ~2.87 Å in-plane PBC cell, leaving the atom bonded.
+    - 10 × c_hat wraps in the surface-normal direction when the total cell
+      height is ~18 Å (6 Å slab + 12 Å vacuum): the atom ends up only
+      18 - (6 + 10) = 2 Å from the bottom layer through PBC.
+    Using fractional coordinates avoids both failure modes.
     """
     atoms = read(str(Path(vasp_dir) / "POSCAR"))
-    c = atoms.cell[2]
-    c_hat = c / np.linalg.norm(c)
-    pos = atoms.get_positions()
-    pos[-1] += 10.0 * c_hat
-    atoms.set_positions(pos)
+    scaled = atoms.get_scaled_positions()
+    top_frac = scaled[:, 2].max()    # top of slab in fractional c
+    bot_frac = scaled[:, 2].min()    # bottom of slab in fractional c
+    # Centre of the vacuum gap (between top of slab and the next periodic
+    # image of the slab bottom), guaranteed to be vacuum/2 from any slab atom.
+    vac_centre_frac = (top_frac + 1.0 + bot_frac) / 2.0
+    if vac_centre_frac >= 1.0:
+        vac_centre_frac -= 1.0
+    scaled[-1, 2] = vac_centre_frac
+    atoms.set_scaled_positions(scaled)
     magmoms = [
         _FAKE_MAGMOMS_BY_ELEMENT.get(sym, 0.0)
         for sym in atoms.get_chemical_symbols()

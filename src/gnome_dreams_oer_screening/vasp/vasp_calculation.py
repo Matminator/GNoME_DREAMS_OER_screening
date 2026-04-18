@@ -7,7 +7,7 @@ from typing import Literal
 
 from ase import Atoms
 from ase.calculators.singlepoint import SinglePointCalculator
-from ase.io import read, Trajectory
+from ase.io import Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.vasp import Vasprun, Incar as VaspIncar
@@ -158,8 +158,13 @@ def run_surface_vasp_two_stage(
 
 
 def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
-    """
-    Read VASP calculation results from a specified directory.
+    """Read VASP results using pymatgen, then return ASE Atoms objects.
+
+    Uses pymatgen's Vasprun exclusively rather than ASE's reader because
+    ASE silently omits magnetic moments when LORBIT≥10 (VASP writes
+    <array name="magnetization"> with per-orbital columns; ASE only handles
+    <varray name="magnetization">). Pymatgen handles both formats and exposes
+    per-atom total magmoms via ionic_steps[i]["magnetization"].
 
     Parameters:
     directory (str): The directory where the VASP calculation was run.
@@ -167,10 +172,9 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     or all intermediate structures.
 
     Returns:
-    list[Atoms]: A list of ASE Atoms objects representing the
-    structures from the VASP calculation.
+    list[Atoms]: ASE Atoms objects with a SinglePointCalculator carrying
+    energy and magnetic moments.
     """
-
     directory = Path(directory)
 
     vr = Vasprun(directory / "vasprun.xml")
@@ -180,13 +184,24 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
             "Check if wall time was exceeded."
         )
 
-    atoms_list = read(directory / "vasprun.xml", index=":")
+    def _step_to_atoms(structure, energy):
+        magmoms = structure.site_properties.get("magmom")
+        if magmoms is None:
+            raise RuntimeError(
+                f"No per-atom magnetization found in {directory}/vasprun.xml. "
+                "Ensure LORBIT is set in INCAR for ISPIN=2 calculations."
+            )
+        atoms = AseAtomsAdaptor.get_atoms(structure)
+        atoms.calc = SinglePointCalculator(atoms, energy=energy, magmoms=magmoms)
+        return atoms
 
     if return_only_final:
-        out = [atoms_list[-1]]
-    else:
-        out = atoms_list
-    return out
+        return [_step_to_atoms(vr.final_structure, vr.final_energy)]
+
+    return [
+        _step_to_atoms(step["structure"], step["electronic_steps"][-1]["e_wo_entrp"])
+        for step in vr.ionic_steps
+    ]
 
 def clean_up_vasp_directory(
     directory: str, files_to_remove: list[str] = None,

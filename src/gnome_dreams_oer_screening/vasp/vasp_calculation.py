@@ -160,11 +160,16 @@ def run_surface_vasp_two_stage(
 def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     """Read VASP results using pymatgen, then return ASE Atoms objects.
 
-    Uses pymatgen's Vasprun exclusively rather than ASE's reader because
-    ASE silently omits magnetic moments when LORBIT≥10 (VASP writes
-    <array name="magnetization"> with per-orbital columns; ASE only handles
-    <varray name="magnetization">). Pymatgen handles both formats and exposes
-    per-atom total magmoms via ionic_steps[i]["magnetization"].
+    Uses pymatgen's Vasprun rather than ASE's reader. ASE's vasprun.xml
+    reader silently omits magnetic moments for LORBIT<10 (written as
+    <varray name="magnetization">). Pymatgen's _parse_ionic_step captures
+    all <varray> elements per ionic step, including magnetization, and
+    stores them in ionic_steps[i]["magnetization"] as list[list[float]]
+    (one inner list per atom, one float per atom for collinear ISPIN=2).
+
+    Requires LORBIT=1 in INCAR. LORBIT=11 writes <array name="magnetization">
+    instead, which _parse_ionic_step does NOT capture — ionic_steps would
+    then have no "magnetization" key and this function raises RuntimeError.
 
     Parameters:
     directory (str): The directory where the VASP calculation was run.
@@ -184,22 +189,25 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
             "Check if wall time was exceeded."
         )
 
-    def _step_to_atoms(structure, energy):
-        magmoms = structure.site_properties.get("magmom")
-        if magmoms is None:
+    def _step_to_atoms(step, energy):
+        mag_data = step.get("magnetization")
+        if not mag_data:
             raise RuntimeError(
-                f"No per-atom magnetization found in {directory}/vasprun.xml. "
-                "Ensure LORBIT is set in INCAR for ISPIN=2 calculations."
+                f"No per-atom magnetization in {directory}/vasprun.xml. "
+                "Ensure LORBIT < 10 is set in INCAR. (only ever tested for LORBIT=1"
             )
-        atoms = AseAtomsAdaptor.get_atoms(structure)
+        # _parse_vasp_array returns list[list[float]]; for collinear ISPIN=2
+        # each inner list has one element: the total moment for that atom.
+        magmoms = [m[0] for m in mag_data]
+        atoms = AseAtomsAdaptor.get_atoms(step["structure"])
         atoms.calc = SinglePointCalculator(atoms, energy=energy, magmoms=magmoms)
         return atoms
 
     if return_only_final:
-        return [_step_to_atoms(vr.final_structure, vr.final_energy)]
+        return [_step_to_atoms(vr.ionic_steps[-1], vr.final_energy)]
 
     return [
-        _step_to_atoms(step["structure"], step["electronic_steps"][-1]["e_wo_entrp"])
+        _step_to_atoms(step, step["e_0_energy"])
         for step in vr.ionic_steps
     ]
 

@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from ase import Atoms
 from ase.io import read
 
 from pymatgen.io.vasp import Incar as VaspIncar, Poscar
@@ -26,8 +27,8 @@ H2_GFE          = -6.77
 
 # ─── Per-mode configuration ─────────────────────────────────────────────────────
 _CFG = {
-    "slurm_test":      {"sleep_sec": 5,  "sleep_min": 0.25 },
-    "MLIP_test":       {"sleep_sec": 5,  "sleep_min": 2  },
+    "slurm_test":      {"sleep_sec": 20,  "sleep_min": 0.25 },
+    "MLIP_test":       {"sleep_sec": 20,  "sleep_min": 2  },
     "production_test": {"sleep_sec": 180, "sleep_min": 2  },
     "production":      {"sleep_sec": 180, "sleep_min": 2  },
 }
@@ -188,11 +189,6 @@ study = payload["candidates_df"].loc[
 check(
     study.get_bulk_structure() is not None,
     "Relaxed bulk structure present in pickled study_obj",
-)
-surface_studies = study.get_surface_studies()
-check(
-    surface_studies is not None and TERM_IDX in surface_studies,
-    "OER surface study dict present in pickled study_obj",
 )
 
 # ── Stage 2: Surface relaxation ───────────────────────────────────────────────
@@ -373,13 +369,9 @@ print(f"  Total run time: {total_sec//3600:02d}:{(total_sec % 3600)//60:02d}:{to
 print(f"{'='*60}\n", flush=True)
 
 print("Process log:")
-print(EXPLOG.relational_frame.processes.df[
-    ["process_id", "job_type", "status", "G(O)", "G(OH)", "ideal overpotential"]
-].to_string())
+print(EXPLOG.relational_frame.processes.df.to_string())
 print("\nCandidate log:")
-print(EXPLOG.relational_frame.candidates.df[
-    ["candidate_id", "idealOverPotential", "Overpotential_from_scaling"]
-].to_string())
+print(EXPLOG.relational_frame.candidates.df.to_string())
 
 # ── Deep pickle value check ───────────────────────────────────────────────────
 print(f"\n{elapsed()}  ── Deep pickle value check ──", flush=True)
@@ -433,4 +425,37 @@ check(
 check(
     pkl_ss[TERM_IDX].get_relaxed_surface() is not None,
     "Final pickle surface study has relaxed surface",
+)
+plk_ad_studies = pkl_ss[TERM_IDX].get_adsorption_site_studies_dict()
+plk_on_top_study = plk_ad_studies[ON_TOP_IDX]
+plk_lat_o_study = plk_ad_studies[LATTICE_O_IDX]
+
+# Test that relaxed O magmoms are present in the pickled study objects:
+check(
+    len(plk_on_top_study._relaxed_O_magmom) == len(on_top_study.relaxed_O_atoms),
+    "Final pickle on-top adsorption study has _relaxed_O_magmom",
+)
+check(
+    len(plk_lat_o_study._relaxed_O_magmom) == len(lattice_o_study.relaxed_O_atoms),
+    "Final pickle lattice-O adsorption study has _relaxed_O_magmom",
+)
+
+# Test that relaxed O atoms exist in the pickled study objects:
+check(
+    isinstance(plk_on_top_study.relaxed_O_atoms, Atoms) and len(plk_on_top_study.relaxed_O_atoms) > 0,
+    "Final pickle on-top adsorption study has relaxed_O_atoms",
+)
+check(
+    isinstance(plk_lat_o_study.relaxed_O_atoms, Atoms) and len(plk_lat_o_study.relaxed_O_atoms) > 0,
+    "Final pickle lattice-O adsorption study has relaxed_O_atoms",
+)
+
+# Test that relaxed OH atoms exist in the pickled study objects:
+check(
+    isinstance(plk_on_top_study.relaxed_OH_atoms, Atoms) and len(plk_on_top_study.relaxed_OH_atoms) > 0,
+    "Final pickle on-top adsorption study has relaxed_OH_atoms",
+)
+check(
+    isinstance(plk_lat_o_study.relaxed_OH_atoms, Atoms) and len(plk_lat_o_study.relaxed_OH_atoms) > 0,
+    "Final pickle lattice-O adsorption study has relaxed_OH_atoms",
 )

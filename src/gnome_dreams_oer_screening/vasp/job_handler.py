@@ -1045,6 +1045,16 @@ class Job_handler():
                             )
                         clean_up_vasp_directory(vasp_dir)
                     except Exception:
+                        import traceback
+                        print(
+                            '\n\n' + '-'*80 + '\n',
+                            f"\n[update_log] process {process_id} "
+                            f"({job_type}) FAILED while reading results "
+                            f"from {vasp_dir}:\n"
+                            + traceback.format_exc(),
+                            '\n\n' + '-'*80 + '\n',
+                            flush=True,
+                        )
                         self.rframe.processes.df.at[idx, 'status'] \
                             = 'failed'
                         updates[process_id] = 'failed'

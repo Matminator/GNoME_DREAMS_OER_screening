@@ -139,11 +139,11 @@ def _fake_disconnected_surface_reader(vasp_dir):
     """Fake reader that displaces one slab atom to break connectivity.
 
     Used by test_production_mode_unrecoverable_surface_fe to trigger the
-    unrecoverable_reason path in job_handler.py:1247–1286.
+    unrecoverable_reason path in job_handler.py:1247-1286.
 
     Displacement of 4 Å in z guarantees the atom is beyond the bond-cutoff
     (~3.5 Å for Fe) without PBC-wrapping back through the vacuum layer
-    (vacuum is typically 10–15 Å, so 4 Å stays safely within the cell).
+    (vacuum is typically 10-15 Å, so 4 Å stays safely within the cell).
     A 25 Å displacement is NOT used because PBC could wrap the atom to the
     opposite side of the slab, accidentally restoring connectivity.
     """
@@ -164,12 +164,13 @@ def _fake_disconnected_surface_reader(vasp_dir):
 def _job_type_aware_disconnected_reader(vasp_dir):
     """Route bulk vs surface POSCAR to different readers.
 
-    Bulk Fe has 1–2 atoms; any slab has significantly more.  Only slabs
-    get the disconnected-surface treatment so that bulk phases complete
-    normally before the surface relaxation is intentionally broken.
+    Slabs always have a large z-cell (vacuum ≥ 14 Å + slab ≥ 4 Å).
+    BCC Fe bulk cells with magnetic_bulk_n_max=4 are ≤ 5.74 Å tall.
+    10 Å is a safe threshold; the previous len(atoms) > 4 check failed
+    for 4-atom slabs (e.g. primitive 4-layer BCC(001)).
     """
     atoms = read(str(Path(vasp_dir) / "POSCAR"))
-    if len(atoms) > 4:
+    if atoms.cell[2][2] > 10.0:  # slab: large z-cell from vacuum layer
         return _fake_disconnected_surface_reader(vasp_dir)
     return _default_fake_read_vasp_results(vasp_dir)
 
@@ -183,7 +184,7 @@ def _apply_production_mocks(explog, monkeypatch, result_reader=None):
 
     2. Monkeypatch get_my_jobs_status to return {} (empty dict).
        An absent slurm_id is the normal post-completion state — the loop at
-       job_handler.py:962–984 sets those processes to 'updating', exactly as
+       job_handler.py:962-984 sets those processes to 'updating', exactly as
        it would when a real SLURM job finishes and leaves the queue.
 
     3. Monkeypatch read_vasp_results to return atoms built from the POSCAR

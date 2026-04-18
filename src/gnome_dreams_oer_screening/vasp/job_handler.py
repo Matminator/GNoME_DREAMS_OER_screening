@@ -1108,6 +1108,12 @@ class Job_handler():
                     surface_study = surface_studies[termination_index]
 
                     if job_type == 'surface_relaxation':
+                        # Defensive: base_surface_non_relaxed has tags=0
+                        # today, but restore explicitly so the invariant
+                        # holds if slab tagging is ever added.
+                        atoms.set_tags(
+                            surface_study.get_non_relaxed_surface().get_tags()
+                        )
                         success = surface_study.\
                             set_relaxed_base_surface(atoms, energy=energy)
                         if not success:
@@ -1121,6 +1127,11 @@ class Job_handler():
                             get_adsorption_site_studies_dict()
                         ad_study = ad_site_dict[site_index]
                         if job_type == 'O_adsorption':
+                            # Restore tags lost in VASP round-trip
+                            # (POSCAR/vasprun.xml strip ASE tags).
+                            atoms.set_tags(
+                                ad_study.get_atoms_for_O_calc().get_tags()
+                            )
                             result = ad_study.set_relaxed_O_calc(
                                 atoms, energy=energy
                             )
@@ -1136,6 +1147,10 @@ class Job_handler():
                                     "by study sanity checks."
                                 )
                         elif job_type == 'OH_adsorption':
+                            # Restore tags lost in VASP round-trip.
+                            atoms.set_tags(
+                                ad_study.OH_init_atoms[0].get_tags()
+                            )
                             result = ad_study.set_relaxed_OH_calc(
                                 atoms, energies=[energy]
                             )

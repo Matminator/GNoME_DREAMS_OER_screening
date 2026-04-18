@@ -26,19 +26,17 @@ H2_GFE          = -6.77
 
 # ─── Per-mode configuration ─────────────────────────────────────────────────────
 _CFG = {
-    "slurm_test":      {"sleep_sec": 60,  "sleep_min": 0.1, "pickle_test": True},
-    "MLIP_test":       {"sleep_sec": 10,  "sleep_min": 2,   "pickle_test": True},
-    "production_test": {"sleep_sec": 180, "sleep_min": 2,   "pickle_test": False},
-    "production":      {"sleep_sec": 180, "sleep_min": 2,   "pickle_test": False},
+    "slurm_test":      {"sleep_sec": 5,  "sleep_min": 0.25 },
+    "MLIP_test":       {"sleep_sec": 5,  "sleep_min": 2  },
+    "production_test": {"sleep_sec": 180, "sleep_min": 2  },
+    "production":      {"sleep_sec": 180, "sleep_min": 2  },
 }
-SLEEP_SEC   = _CFG[MODE]["sleep_sec"]
-SLEEP_MIN   = _CFG[MODE]["sleep_min"]
-PICKLE_TEST = _CFG[MODE]["pickle_test"]   # Set False to skip pickle round-trip
+SLEEP_SEC = _CFG[MODE]["sleep_sec"]
+SLEEP_MIN = _CFG[MODE]["sleep_min"]
 
 # ─── Output directory ───────────────────────────────────────────────────────────
-OUTPUT_DIR  = current_dir / f"TEMP_{MODE}_hpc_workflow"
+OUTPUT_DIR = current_dir / f"TEMP_{MODE}_hpc_workflow"
 OUTPUT_DIR.mkdir(exist_ok=True)
-PICKLE_PATH = OUTPUT_DIR / "explog.pkl"
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 _start_time = time.monotonic()
@@ -172,27 +170,30 @@ check(
 
 study.initialize_oer_surface_study(TERM_IDX)
 
-# ── Optional pickle checkpoint ────────────────────────────────────────────────
-if PICKLE_TEST:
-    print(f"\n{elapsed()}  ── Pickle checkpoint ──", flush=True)
-    with open(PICKLE_PATH, "wb") as f:
-        pickle.dump(EXPLOG, f)
-    print(f"{elapsed()}  [pickle] EXPLOG written to {PICKLE_PATH}", flush=True)
-
-    with open(PICKLE_PATH, "rb") as f:
-        EXPLOG = pickle.load(f)
-    print(f"{elapsed()}  [pickle] EXPLOG reloaded from {PICKLE_PATH}", flush=True)
-
-    study = EXPLOG.relational_frame.candidates[CAND_ID].study_obj
-    check(
-        study.get_bulk_structure() is not None,
-        "Relaxed bulk structure survives pickle round-trip",
-    )
-    surface_studies = study.get_surface_studies()
-    check(
-        surface_studies is not None and TERM_IDX in surface_studies,
-        "OER surface study dict survives pickle round-trip",
-    )
+# ── Pickle checkpoint ─────────────────────────────────────────────────────────
+print(f"\n{elapsed()}  ── Pickle checkpoint ──", flush=True)
+with open(EXPLOG.vasp_calculation_dir / "explog.pkl", "rb") as f:
+    payload = pickle.load(f)
+check(
+    payload["candidates_df"].shape == EXPLOG.relational_frame.candidates.df.shape,
+    "Pickle candidates_df shape matches live EXPLOG",
+)
+check(
+    payload["processes_df"].shape == EXPLOG.relational_frame.processes.df.shape,
+    "Pickle processes_df shape matches live EXPLOG",
+)
+study = payload["candidates_df"].loc[
+    payload["candidates_df"]["candidate_id"] == CAND_ID, "study_obj"
+].values[0]
+check(
+    study.get_bulk_structure() is not None,
+    "Relaxed bulk structure present in pickled study_obj",
+)
+surface_studies = study.get_surface_studies()
+check(
+    surface_studies is not None and TERM_IDX in surface_studies,
+    "OER surface study dict present in pickled study_obj",
+)
 
 # ── Stage 2: Surface relaxation ───────────────────────────────────────────────
 print(f"\n{elapsed()}  ── Stage 2: Surface relaxation ──", flush=True)
@@ -380,6 +381,56 @@ print(EXPLOG.relational_frame.candidates.df[
     ["candidate_id", "idealOverPotential", "Overpotential_from_scaling"]
 ].to_string())
 
-with open(PICKLE_PATH, "wb") as f:
-    pickle.dump(EXPLOG, f)
-print(f"\n[saved] Final EXPLOG pickled to {PICKLE_PATH}", flush=True)
+# ── Deep pickle value check ───────────────────────────────────────────────────
+print(f"\n{elapsed()}  ── Deep pickle value check ──", flush=True)
+with open(EXPLOG.vasp_calculation_dir / "explog.pkl", "rb") as f:
+    final_payload = pickle.load(f)
+
+live_proc_df = EXPLOG.relational_frame.processes.df
+live_cand_df = EXPLOG.relational_frame.candidates.df
+pkl_proc_df  = final_payload["processes_df"]
+pkl_cand_df  = final_payload["candidates_df"]
+
+check(
+    pkl_proc_df.shape == live_proc_df.shape,
+    "Final pickle processes_df shape matches live",
+)
+check(
+    pkl_cand_df.shape == live_cand_df.shape,
+    "Final pickle candidates_df shape matches live",
+)
+
+for col in ["G(O)", "G(OH)", "ideal overpotential",
+            "overpotential from OH-OOH scaling relation"]:
+    live_vals = live_proc_df[col].dropna()
+    pkl_vals  = pkl_proc_df[col].dropna()
+    check(
+        live_vals.equals(pkl_vals),
+        f"processes_df['{col}'] values match between live and pickle",
+    )
+
+for col in ["idealOverPotential", "Overpotential_from_scaling"]:
+    live_val = float(live_cand_df.loc[
+        live_cand_df["candidate_id"] == CAND_ID, col].iloc[0])
+    pkl_val  = float(pkl_cand_df.loc[
+        pkl_cand_df["candidate_id"] == CAND_ID, col].iloc[0])
+    check(
+        live_val == pkl_val,
+        f"candidates_df['{col}'] value matches: live={live_val:.4f} pkl={pkl_val:.4f}",
+    )
+
+pkl_study = pkl_cand_df.loc[
+    pkl_cand_df["candidate_id"] == CAND_ID, "study_obj"].values[0]
+check(
+    pkl_study.get_bulk_structure() is not None,
+    "Final pickle study_obj has relaxed bulk structure",
+)
+pkl_ss = pkl_study.get_surface_studies()
+check(
+    pkl_ss is not None and TERM_IDX in pkl_ss,
+    "Final pickle study_obj has OER surface study for TERM_IDX",
+)
+check(
+    pkl_ss[TERM_IDX].get_relaxed_surface() is not None,
+    "Final pickle surface study has relaxed surface",
+)

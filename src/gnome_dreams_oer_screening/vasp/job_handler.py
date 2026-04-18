@@ -977,13 +977,13 @@ class Job_handler():
                         # energy. Energy is mandatory — raises if missing.
                         # Forces are not needed. Magmoms fall back to zeros
                         # if the MLIP model provides no spin moments.
-                        _energy = atoms.get_potential_energy()
+                        energy = atoms.get_potential_energy()
                         try:
-                            _magmoms = atoms.get_magnetic_moments()
+                            magmom = atoms.get_magnetic_moments().tolist()
                         except Exception:
-                            _magmoms = [0.0] * len(atoms)
+                            magmom = [0.0] * len(atoms)
                         atoms.calc = SinglePointCalculator(
-                            atoms, energy=_energy, magmoms=_magmoms
+                            atoms, energy=energy, magmoms=magmom
                         )
                         clean_up_vasp_directory(vasp_dir)
 

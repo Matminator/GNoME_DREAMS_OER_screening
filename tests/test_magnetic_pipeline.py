@@ -164,13 +164,11 @@ def _fake_disconnected_surface_reader(vasp_dir):
 def _job_type_aware_disconnected_reader(vasp_dir):
     """Route bulk vs surface POSCAR to different readers.
 
-    Slabs always have a large z-cell (vacuum ≥ 14 Å + slab ≥ 4 Å).
-    BCC Fe bulk cells with magnetic_bulk_n_max=4 are ≤ 5.74 Å tall.
-    10 Å is a safe threshold; the previous len(atoms) > 4 check failed
-    for 4-atom slabs (e.g. primitive 4-layer BCC(001)).
+    job_handler.py encodes the job_type in the vasp_dir name:
+        {prefix}{candidate_id}_{job_type}_{process_id}
+    Matching on "surface_relaxation" is exact and requires no geometry heuristics.
     """
-    atoms = read(str(Path(vasp_dir) / "POSCAR"))
-    if atoms.cell[2][2] > 10.0:  # slab: large z-cell from vacuum layer
+    if "surface_relaxation" in Path(vasp_dir).name:
         return _fake_disconnected_surface_reader(vasp_dir)
     return _default_fake_read_vasp_results(vasp_dir)
 
@@ -880,13 +878,14 @@ def test_production_mode_full_pipeline_fe(tmp_path, fe_bcc_atoms, monkeypatch):
     # Phase 4 — OH adsorption in production mode
     # ------------------------------------------------------------------
     for site_idx in ad_site_dict.keys():
-        pid = EXPLOG.add_process(
+        pids = EXPLOG.add_process(
             candidate_id=cand_id,
             calculation_type="OH_adsorption",
             termination_index=termination_index,
             site_index=site_idx,
         )
-        EXPLOG.submit_process(process_id=pid)
+        for p in pids:
+            EXPLOG.submit_process(process_id=p)
 
     EXPLOG.update_log()
 

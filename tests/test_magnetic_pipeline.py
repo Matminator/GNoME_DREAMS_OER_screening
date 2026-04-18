@@ -151,7 +151,7 @@ def _fake_disconnected_surface_reader(vasp_dir):
     so the displaced atom stays well inside the vacuum layer.
     """
     atoms = read(str(Path(vasp_dir) / "POSCAR"))
-    atoms.positions[-1] += [0.0, 0.0, 6.0]
+    atoms.positions[-1] += [6.0, 6.0, 6.0]
     magmoms = [
         _FAKE_MAGMOMS_BY_ELEMENT.get(sym, 0.0)
         for sym in atoms.get_chemical_symbols()
@@ -1023,7 +1023,7 @@ def test_production_mode_unrecoverable_surface_fe(tmp_path, fe_bcc_atoms,
     EXPLOG.add_candidate(
         candidate_id=cand_id,
         reason_or_hypothesis="unrecoverable-surface path test",
-        notes="surface atom displaced 4 Å to break connectivity",
+        notes="surface atom displaced 6 Å to break connectivity",
         study_obj=study,
     )
 

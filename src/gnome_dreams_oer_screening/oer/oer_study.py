@@ -23,8 +23,7 @@ from gnome_dreams_oer_screening.oer.ad_site_determination import (
 )
 
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
-    are_systems_equal,
-    StructureConsistencyError,
+    assert_elements_subset,
 )
 
 # Suppress specific warnings from pymatgen about too many sites removed.
@@ -36,15 +35,6 @@ warnings.filterwarnings(
     message="Too many sites removed, please use a larger slab",
     category=UserWarning,
 )
-
-"""
-TODO:
-should the terminations builder not fail hard, when some terminations
-may be accetable, but some fail to generate?
-"""
-
-
-
 
 
 class OER_catalyst_study:
@@ -71,8 +61,12 @@ class OER_catalyst_study:
         made to the DFT OH* adsorption energy.
         default_OOH_ad_correction (float, optional): Default correction
         made to the DFT OOH* adsorption energy.
-        use_init_as_relaxed_bulk (bool, optional): Whether to use the
-        initial bulk structure as the relaxed bulk structure.
+        use_init_as_relaxed_bulk (bool): If True, the init structure is used
+        directly as the relaxed bulk, bypassing the magnetic enumeration
+        pipeline entirely. Intended for testing, notebooks, and non-magnetic
+        materials where running the full magnetic batch (enumerate → store →
+        finalize) is not required. Sets _mag_bulk_batch_finalized = True so
+        finalize_mag_bulk_batch will raise if accidentally called afterwards.
     """
 
     def __init__(self, init_atoms: Atoms,
@@ -81,10 +75,10 @@ class OER_catalyst_study:
                  default_O_ad_correction: float = 0.070,
                  default_OH_ad_correction: float = 0.361,
                  default_OOH_ad_correction: float = 0.431,
+                 OH_OOH_scaling_intercept: float = 3.2,
                  use_init_as_relaxed_bulk: bool = False,
-                 OH_OOH_scaling_intercept: float = 3.2
                  ):
-        
+
          # Avoid mutations outside of this class:
         init_atoms = init_atoms.copy()
         for atom in init_atoms:
@@ -92,13 +86,8 @@ class OER_catalyst_study:
 
         self.init_atoms = init_atoms
         self.init_structure = AseAtomsAdaptor.get_structure(init_atoms)
-        
-        if use_init_as_relaxed_bulk:
-            self.bulk_atoms = self.init_atoms.copy()
-            self.bulk_structure = self.init_structure.copy()
-        else:
-            self.bulk_atoms = None
-            self.bulk_structure = None
+        self.bulk_atoms = None
+        self.bulk_structure = None
             
         self.species_energies = {
             'H2O_gas_free_energy': H2O_gas_free_energy,
@@ -117,13 +106,22 @@ class OER_catalyst_study:
         # self.failed_slab_generation = False
         self.OH_OOH_scaling_intercept = OH_OOH_scaling_intercept
 
+        self._mag_bulk_candidates: dict[int, tuple] = {}  # {idx: (atoms, energy, magmom)}
+        self._mag_bulk_batch_finalized: bool = False
+        self._bulk_magmom: list[float] | None = None
+        self._mag_bulk_configs: list[dict] | None = None
+
+        if use_init_as_relaxed_bulk:
+            self._set_relaxed_structure(self.init_atoms)
+            self._mag_bulk_batch_finalized = True
+
     def get_init_structure(self) -> Structure:
         return self.init_structure.copy()
     
     def get_init_atoms(self) -> Atoms:
         return self.init_atoms.copy()
     
-    def set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
+    def _set_relaxed_structure(self, relaxed_bulk: Atoms | Structure
                            ) -> None:
             
         # Do not allow resetting the relaxed bulk structure if surfaces 
@@ -152,17 +150,22 @@ class OER_catalyst_study:
         # Make a copy, to avoide mutations outside of this class
         relaxed_bulk = relaxed_bulk.copy() 
         
-        # Test provided relaxed_bulk structure matches the initial bulk:
-        equal_results = are_systems_equal(relaxed_bulk_atoms, self.init_atoms)
-        if not equal_results[0]:
-            raise StructureConsistencyError(
-                "The provided relaxed_bulk structure does not match "
-                "the initial bulk structure. Details: "
-                f"{equal_results[1]}"
-            )
+        # Allow primitive-cell representations of the same material.  Only require
+        # that the relaxed bulk contains no elements absent from the initial
+        # structure — atom count may differ if the enumerator reduced the cell.
+        assert_elements_subset(
+            relaxed_bulk_atoms, self.init_atoms, label="relaxed_bulk"
+        )
 
         self.bulk_structure = relaxed_bulk_structure
         self.bulk_atoms = relaxed_bulk_atoms
+
+    def set_relaxed_structure(self, atoms: Atoms) -> None:
+        """Bypass for direct bulk setting — used in tests and notebooks.
+        Marks the magnetic batch as finalized so finalize_mag_bulk_batch
+        is not expected to run. Does not raise if already set."""
+        self._set_relaxed_structure(atoms)
+        self._mag_bulk_batch_finalized = True
 
     def set_energies(self,
             H2O_gas_free_energy: float | None = None,
@@ -201,6 +204,103 @@ class OER_catalyst_study:
             return None
         else:
             return self.bulk_structure.copy()
+
+    def store_mag_bulk_candidate(self, idx: int, atoms: Atoms,
+                                  energy: float, magmom: list[float]) -> None:
+        """Store a completed magnetic bulk result keyed by config index.
+
+        Raises ValueError if magmom length does not match atom count.
+        Raises StructureConsistencyError if atoms are inconsistent with
+        the initial structure (wrong element order, wrong count, etc.).
+        """
+        if len(magmom) != len(atoms):
+            raise ValueError(
+                f"magmom length ({len(magmom)}) does not match "
+                f"number of atoms ({len(atoms)}) for candidate {idx}."
+            )
+        # Allow primitive-cell representations: only require that the candidate
+        # contains no elements absent from the initial structure.  The enumerator
+        # may return a cell with fewer atoms (e.g. FM BCC Fe collapses to the
+        # 1-atom primitive cell), which is valid as long as no new species appear.
+        assert_elements_subset(
+            atoms, self.init_atoms, label=f"Candidate {idx}"
+        )
+        self._mag_bulk_candidates[idx] = (atoms, energy, magmom)
+
+    def is_mag_bulk_batch_finalized(self) -> bool:
+        return self._mag_bulk_batch_finalized
+
+
+    # Returns False when all bulk relaxations failed (no candidates stored).
+    # All process rows are already in terminal state in the process log —
+    # that is the correct and sufficient failure signal.
+    def finalize_mag_bulk_batch(self) -> bool:
+        """
+        Pick the lowest-energy-per-atom magnetic candidate, set it as the
+        relaxed bulk, and store its magmoms as site properties so that
+        SlabGenerator propagates them to slabs.
+        Returns True on success, False if no completed candidates exist.
+        Raises RuntimeError if called after already finalized (indicates a
+        bug in the calling code).
+        """
+        if self._mag_bulk_batch_finalized:
+            raise RuntimeError(
+                "finalize_mag_bulk_batch called after batch already finalized."
+            )
+        if not self._mag_bulk_candidates:
+            return False
+
+        best_idx = min(
+            self._mag_bulk_candidates,
+            key=lambda i: (
+                self._mag_bulk_candidates[i][1] / len(self._mag_bulk_candidates[i][0])
+            ),
+        )
+        best_atoms, best_energy, best_magmom = self._mag_bulk_candidates[best_idx]
+
+        if np.isnan(best_energy):
+            raise ValueError(
+                f"Winning bulk candidate {best_idx} has NaN energy. "
+                "Check VASP convergence for this candidate."
+            )
+        if np.any(np.isnan(best_magmom)):
+            raise ValueError(
+                f"Winning bulk candidate {best_idx} has NaN magnetic moments. "
+                "Check VASP convergence for this candidate."
+            )
+
+        # Calls the existing validated setter (checks atom count, symbols, tags):
+        self._set_relaxed_structure(best_atoms)
+
+        # _set_relaxed_structure converts via AseAtomsAdaptor which drops magmom.
+        # Set site properties explicitly on the now-assigned bulk_structure:
+        for site, m in zip(self.bulk_structure.sites, best_magmom):
+            site.properties["magmom"] = m
+
+        self._bulk_magmom = list(best_magmom)
+        self._mag_bulk_batch_finalized = True
+        return True
+
+    def get_bulk_magmom(self) -> list[float] | None:
+        """Per-atom magnetic moments for the winning bulk configuration.
+        Relaxed VASP moments in production; initial enumerator moments in test mode."""
+        return list(self._bulk_magmom) if self._bulk_magmom is not None else None
+
+
+    def store_mag_bulk_configs(self, configs: list[dict]) -> None:
+        """Store the enumerated initial magnetic configurations for this study.
+        Called once from enter_process. Raises RuntimeError if configs are already
+        stored — re-storing indicates a duplicate enter_process call."""
+        if getattr(self, '_mag_bulk_configs', None) is not None:
+            raise RuntimeError(
+                "Magnetic bulk configs are already stored for this study. "
+                "store_mag_bulk_configs must only be called once per study."
+            )
+        self._mag_bulk_configs: list[dict] = configs
+
+    def get_mag_bulk_configs(self) -> list[dict] | None:
+        """Return the stored initial magnetic configs, or None if not yet stored."""
+        return getattr(self, '_mag_bulk_configs', None)
 
     def get_distinct_millers(self) -> list[tuple[int, int, int]] | None:
         if self.distinct_millers is None:
@@ -324,7 +424,7 @@ class OER_catalyst_study:
             break  # Surfaces were generated successfully; exit loop.
 
         # Removing slabs that contain too many atoms or are too thick.
-        # NOTE: could consider a more refined approach in the future.
+        # FUTURE-NOTE: could consider a more refined approach in the future.
         slabs = [slab for slab in slabs if len(slab) <= max_atoms]
         slabs = [slab for slab in slabs if 
                     compute_slab_thickness(slab)
@@ -389,9 +489,9 @@ class OER_catalyst_study:
         if self.bulk_atoms is None or self.bulk_structure is None:
             raise RuntimeError(
                 "Cannot rank terminations because the relaxed bulk "
-                "structure is not set. Set it with "
-                "`set_relaxed_structure(...)` or initialize the study "
-                "with `use_init_as_relaxed_bulk=True`."
+                "structure is not set. Use "
+                "`store_mag_bulk_candidate` + `finalize_mag_bulk_batch` "
+                "to set the relaxed bulk through the magnetic workflow."
             )
 
         if max_diff_dict is None:
@@ -619,22 +719,6 @@ class OER_catalyst_study:
                 f"{termination_index}. No generated termination exists "
                 "for this index."
             )
-
-        # --- DEPRECATED CODE - WILL BE REMOVED IN THE FUTURE ----------
-
-        # # Do a sanity check if miller indices are provided:
-        # if miller_indices is not None:
-        #     # TODO: If `self.termination_ranking_df` is None here, raise
-        #     # a descriptive ValueError instructing the caller to run
-        #     # `predict_most_likely_surfaces(...)` first.
-        #     df = self.termination_ranking_df
-        #     millers_terminations_indecies = df[df['Miller indices'] ==
-        #                 miller_indices]['Termination index'].values
-        #     if termination_index not in millers_terminations_indecies:
-        #         raise ValueError("The provided termination_index does "\
-        #         "not correspond to the provided miller_indices.")
-
-        # --------------------------------------------------------------
 
         slab = self.terminations[termination_index]
         oer_surface_study = OER_surface_study(self, slab,

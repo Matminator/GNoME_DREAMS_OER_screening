@@ -14,23 +14,81 @@ class OER_adsorption_site_study:
     MAX_SITE_BOND_DISTANCE_FACTOR = 1.2
 
     """
-    Class for managing placement of OER intermediates on a given 
-    adsorption site of a clean surface, and storage of the energies.
-    Is intended to be initialized through the OER_surface_study class,
-    via the 'initialize_adsorption_site_study' method.
+    Manages placement of OER intermediates on a single adsorption site
+    and stores the energies needed to compute adsorption free energies.
+
+    Intended to be created through
+    ``OER_surface_study.initialize_adsorption_site_study``.
+
+    Energy reference model
+    ----------------------
+    The two supported site types use different energy conventions for the
+    entries in ``energies_dict``:
+
+    **on-top** site:
+        The reference state is the bare (clean) relaxed surface.
+
+        - ``clean_surface_energy``: set from the relaxed surface energy
+          at construction (``init[1]``). DFT energy of the slab
+          *without* any adsorbate.
+        - ``O_adsorbed_energy``: set by ``set_relaxed_O_calc`` after the
+          O-adsorption DFT run (slab + O atom placed on top).
+        - ``OH_adsorbed_energy``: set by ``set_relaxed_OH_calc`` after
+          the OH-adsorption DFT run (slab + OH, starting from the
+          relaxed O structure).
+        - G(O) requires ``clean_surface_energy`` and
+          ``O_adsorbed_energy``.
+        - G(OH) requires ``clean_surface_energy``,
+          ``OH_adsorbed_energy``, and ``oh_batch_finalized == True``.
+
+    **lattice O** site:
+        The lattice oxygen *is* the adsorbate; the surface already
+        carries it in its initial (relaxed) state.
+
+        - ``O_adsorbed_energy``: set from the relaxed surface energy at
+          construction (``init[1]``). DFT energy of the slab *with* the
+          lattice O present — the O-adsorbed state.
+        - ``clean_surface_energy``: set by ``set_relaxed_O_calc`` after
+          the O-adsorption DFT run. For lattice-O sites the
+          "O-adsorption" calculation *removes* the lattice O atom and
+          relaxes the remaining surface; that energy is the
+          clean-surface (reference) state.
+        - ``OH_adsorbed_energy``: set by ``set_relaxed_OH_calc`` after
+          the OH-adsorption DFT run (lattice O intact, H placed
+          nearby).
+        - G(O) requires both ``clean_surface_energy`` and
+          ``O_adsorbed_energy`` → **O_adsorption must complete first**.
+        - G(OH) requires ``clean_surface_energy``,
+          ``OH_adsorbed_energy``, and ``oh_batch_finalized == True``
+          → **O_adsorption must also complete before G(OH) is
+          defined**, even if the OH batch finalized earlier.
+
+    ``oh_batch_finalized`` flag
+    ---------------------------
+    Defaults to ``True`` at construction. Direct/manual workflows that
+    call ``set_relaxed_OH_calc`` directly expose OH metrics immediately.
+    When OH jobs are submitted via ``Job_handler``, the flag is set to
+    ``False`` for the duration of the batch and is restored to ``True``
+    once all three OH-initialization processes reach a terminal status.
+    ``OER_surface_study.update_adsorption_energies`` suppresses G(OH)
+    while this flag is ``False``.
 
     Args:
-        init_surface: Atoms
-            The clean surface on which the adsorbate is to be placed.
-        init_add_position: np.ndarray
-            The initial position (3D coordinates) for placing the O 
-            adsorbate.
-        site_index: int
-            The index of the adsorption site on the surface (determined 
-            by the OER_surface_study class).
-        init: tuple(str, float)
-            A tuple containing the type of adsorption site and the 
-            initial energy of the surface.
+        init_surface (Atoms): The relaxed surface on which the adsorbate
+            is placed. For lattice-O sites this surface already contains
+            the lattice O atom (tag=3).
+        init_add_position (np.ndarray): 3-D coordinates for the initial
+            adsorbate position (O for on-top; used to orient H for
+            lattice-O OH initializations).
+        site_index (int): Integer index of this adsorption site, as
+            assigned by
+            ``OER_surface_study.determine_adsorption_sites``.
+        surface_normal (np.ndarray): Unit-length surface normal, used to
+            orient OH initializations.
+        init (tuple[str, float]): ``(site_type, reference_energy)``
+            where ``site_type`` is ``'on-top'`` or ``'lattice O'`` and
+            ``reference_energy`` is the relaxed surface DFT energy
+            (interpreted differently per site type as described above).
     """
 
     def __init__(self, init_surface: Atoms, 
@@ -65,6 +123,7 @@ class OER_adsorption_site_study:
         
         self.energies_dict = energies_dict
         self.relaxed_O_atoms = None
+        self._relaxed_O_magmom: list[float] | None = None
         self.OH_init_atoms = None
         self.relaxed_OH_atoms = None
         self.accepted_relaxed_OH_pairs = []
@@ -204,7 +263,8 @@ class OER_adsorption_site_study:
         return d_OH <= max_OH_distance
     
     def set_relaxed_O_calc(self, atoms: Atoms,
-                                energy: float | None = None
+                                energy: float | None = None,
+                                require_magmom: bool = True,
                                 ) -> tuple[bool, str | None]:
         """
         Validate and store one relaxed O-stage structure.
@@ -272,6 +332,20 @@ class OER_adsorption_site_study:
 
 
 
+        # Extract relaxed magmoms BEFORE copy — atoms.copy() does not preserve the calculator.
+        if atoms.calc is not None:
+            moms = atoms.get_magnetic_moments()
+            self._relaxed_O_magmom = moms.tolist()
+
+        if require_magmom and self._relaxed_O_magmom is None:
+            raise ValueError(
+                "require_magmom=True but no magnetic moments could be "
+                "extracted from the relaxed O structure (no calculator "
+                "attached). Set require_magmom=False only in unit tests "
+                "or fake-result modes where no real VASP calculator is "
+                "attached."
+            )
+
         self.relaxed_O_atoms = atoms.copy()
 
         # Set energy, depending on the site type:
@@ -284,6 +358,56 @@ class OER_adsorption_site_study:
 
         return True, None
             
+    def get_O_calc_magmom(self) -> list[float] | None:
+        """Per-atom magmoms from the relaxed O-stage structure (post-VASP).
+        Returns None if set_relaxed_O_calc hasn't been called or had no calculator."""
+        if self._relaxed_O_magmom is not None:
+            return list(self._relaxed_O_magmom)
+        return None
+
+    def get_O_init_magmom(self, slab_magmom: list[float]) -> list[float]:
+        """Initial MAGMOM list for the O adsorption VASP run, from slab magmoms.
+
+        on-top:    slab magmoms + [0.0] for the added O adsorbate.
+        lattice-O: slab magmoms minus the entry for the removed lattice-O atom.
+        """
+        if self.site_type == 'on-top':
+            return list(slab_magmom) + [0.0]
+        elif self.site_type == 'lattice O':
+            # The lattice-O atom (tag=3) is deleted from the slab for this calc.
+            site_idx = self._get_site_atom_index(self.init_surface)
+            result = list(slab_magmom)
+            del result[site_idx]
+            return result
+        raise ValueError(f"Unsupported site type: {self.site_type}")
+
+    def get_OH_init_magmom(self, surface_magmom: list[float]) -> list[float]:
+        """Initial MAGMOM list for the OH adsorption VASP run.
+
+        on-top:    uses _relaxed_O_magmom (N+1: slab+O) + [0.0] for H = N+2.
+                   Raises RuntimeError if O-stage magmoms are absent.
+        lattice-O: _relaxed_O_magmom covers surface-without-O (N-1, wrong count).
+                   Always uses surface_magmom (N) + [0.0] for H = N+1.
+
+        Raises RuntimeError if surface_magmom is None.
+        """
+        if surface_magmom is None:
+            raise RuntimeError(
+                "surface_magmom is required for OH magmom setup. "
+                "The surface must be relaxed and its magmoms available."
+            )
+        if self.site_type == 'on-top':
+            if self._relaxed_O_magmom is None:
+                raise RuntimeError(
+                    "get_OH_init_magmom called for on-top site before O-stage "
+                    "magmoms are available. set_relaxed_O_calc must be called "
+                    "with a calculator-attached structure first."
+                )
+            return list(self._relaxed_O_magmom) + [0.0]
+        elif self.site_type == 'lattice O':
+            return list(surface_magmom) + [0.0]
+        raise ValueError(f"Unsupported site type: {self.site_type}")
+
     def get_adsorption_site_energies(self) -> dict[str, float | None]:
         return self.energies_dict.copy()
 

@@ -70,14 +70,21 @@ class OER_surface_study:
         "OOH": 3.69,
     }
 
-    def __init__(self, 
+    def __init__(self,
                  OER_catalyst_study,
                  input_surface: Slab,
                  normal_vector: np.ndarray | None = None,
                  fixed_bottom_half: bool = True, vacuum: float = 14
                  ):
 
-        # Make sure that the surface is on the form of an ASE Atoms 
+        if not isinstance(input_surface, Slab):
+            raise ValueError(
+                f"input_surface must be a Slab, got {type(input_surface).__name__}. "
+                "Slab generation may have failed for this termination "
+                "(stoichiometry check, timeout, or layer limit)."
+            )
+
+        # Make sure that the surface is on the form of an ASE Atoms
         # object and an np.array containing the normal vector:
         base_surface, surface_normal = get_atoms_and_normal_from_input(
                                             input_surface, normal_vector
@@ -117,6 +124,7 @@ class OER_surface_study:
         self.add_sites_df_non_relaxed = None
         self.base_surface_relaxed = None
         self.relaxed_surface_energy = None
+        self._relaxed_surface_magmom: list[float] | None = None
         self.add_sites_df_relaxed = None
         
         # This lock prevents further calculations (add-site studies)
@@ -135,11 +143,34 @@ class OER_surface_study:
             out = self.base_surface_relaxed.copy()
         return out
 
-    def set_relaxed_base_surface(self, surface: Atoms, 
+    def get_slab_magmom(self) -> list[float] | None:
+        """
+        Per-atom magnetic moments from the original (non-relaxed) slab as
+        propagated by SlabGenerator from the bulk site_properties["magmom"].
+        Returns None if no magmom site property is set.
+        """
+        magmom = self.original_slab.site_properties.get("magmom")
+        if magmom is None:
+            return None
+        return list(magmom)
+
+    def get_relaxed_surface_magmom(self) -> list[float] | None:
+        """
+        Per-atom magnetic moments extracted from the VASP-relaxed surface.
+        Returns None if set_relaxed_base_surface has not been called yet or
+        if no calculator was attached when it was called.
+        Use get_slab_magmom() for the initial (non-relaxed) magmoms.
+        """
+        if self._relaxed_surface_magmom is not None:
+            return list(self._relaxed_surface_magmom)
+        return None
+
+    def set_relaxed_base_surface(self, surface: Atoms,
                                  energy: float | None = None,
+                                 require_magmom: bool = True,
                                  ) -> bool:
         """
-        Set the relaxed surface structure for this surface study. This 
+        Set the relaxed surface structure for this surface study. This
         is for later use in the determination of adsorption sites and
         adsorption energies.
 
@@ -149,6 +180,17 @@ class OER_surface_study:
             The potential energy of the relaxed surface. If None,
             the energy will be obtained from the relaxed surface
             structure (if possible). Default is None.
+        require_magmom: bool
+            If True (default), raises ValueError when no magnetic moments
+            can be extracted from the surface (no calculator attached).
+            All-zero magmoms are valid and accepted — non-magnetic materials
+            (e.g. IrO₂, RuO₂) return [0.0, ...] from VASP and must not be
+            rejected. This is the expected behaviour in any real workflow: a
+            VASP-relaxed surface always carries a calculator with converged
+            magnetic moments.
+            Set to False ONLY in unit tests or fake-result modes where no
+            real VASP calculator is attached. In that case _relaxed_surface_magmom
+            is left as None and get_relaxed_surface_magmom() returns None.
 
         Returns:
         bool
@@ -190,6 +232,22 @@ class OER_surface_study:
                         "not be obtained from the relaxed atoms") from exc
                 
             self.study_locked = False
+
+            # Extract relaxed magmoms BEFORE copy — atoms.copy() does not
+            # preserve the calculator where VASP magmoms live.
+            if surface.calc is not None:
+                moms = surface.get_magnetic_moments()
+                self._relaxed_surface_magmom = moms.tolist()
+
+            if require_magmom and self._relaxed_surface_magmom is None:
+                raise ValueError(
+                    "require_magmom=True but no magnetic moments could be "
+                    "extracted from the relaxed surface (no calculator "
+                    "attached). Set require_magmom=False only in unit tests "
+                    "or fake-result modes where no real VASP calculator is "
+                    "attached."
+                )
+
             self.base_surface_relaxed = surface.copy()
 
         # Return bool on whether the surface is continuous or not. 
@@ -254,6 +312,33 @@ class OER_surface_study:
         self.add_sites_df_relaxed = df
 
     def initialize_adsorption_site_study(self, index: int) -> None:
+        """
+        Create an ``OER_adsorption_site_study`` for the adsorption site
+        at ``index`` on the relaxed surface.
+
+        The site study is initialised with the relaxed surface energy
+        (``self.relaxed_surface_energy``) as the reference energy. How
+        this energy is interpreted depends on the site type (see the
+        ``OER_adsorption_site_study`` class docstring for full details):
+
+        - **on-top**: the energy becomes ``clean_surface_energy`` — the
+          bare slab reference for computing adsorption free energies.
+        - **lattice O**: the energy becomes ``O_adsorbed_energy`` —
+          because the current (relaxed) surface already carries the
+          lattice O atom, which *is* the adsorbate in this model. The
+          clean-surface reference energy is not known until the
+          O-adsorption DFT run completes (``set_relaxed_O_calc``
+          removes the lattice O and stores the resulting energy).
+
+        Consequently, G(O) and G(OH) are both ``None`` for lattice-O
+        sites until the O-adsorption job finishes, regardless of
+        whether the OH batch has already been completed.
+
+        Raises:
+            ValueError: if adsorption sites have not been determined
+                yet, if ``index`` does not exist in the site table, or
+                if a study for this index has already been initialised.
+        """
         if self.add_sites_df_relaxed is None:
             raise ValueError("No adsorption sites have been " \
             "determined for the relaxed surface yet. They " \

@@ -87,3 +87,32 @@ def are_systems_equal(atoms1: Atoms, atoms2: Atoms
 
     return equal, "; ".join(message_parts)
 
+
+def assert_elements_subset(
+    candidate: Atoms,
+    reference: Atoms,
+    label: str = "candidate",
+) -> None:
+    """Validate that a bulk candidate introduces no new elements.
+
+    Only element membership is checked — atom count and ordering may differ.
+    This allows primitive-cell reductions (e.g. FM BCC Fe collapses to the
+    1-atom primitive cell) and does not enforce atom ordering.
+
+    Args:
+        candidate: Atoms object to validate.
+        reference: Atoms object defining the allowed element set.
+        label: Name used in the error message to identify the candidate.
+
+    Raises:
+        StructureConsistencyError: if candidate contains any element absent
+            from reference.
+    """
+    ref_elements = set(reference.get_chemical_symbols())
+    cand_elements = set(candidate.get_chemical_symbols())
+    extra = cand_elements - ref_elements
+    if extra:
+        raise StructureConsistencyError(
+            f"{label} contains elements {sorted(extra)} not present in "
+            "the reference structure."
+        )

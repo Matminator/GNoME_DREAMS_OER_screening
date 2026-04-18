@@ -2,11 +2,12 @@ import numpy as np
 
 from ase import Atoms
 
-from gnome_dreams_oer_screening import (
-    OER_adsorption_site_study,
-    are_all_atoms_connected,
-    is_adsorbate_near_site,
-    is_OH_adsorbate_intact,
+from gnome_dreams_oer_screening.oer.oer_adsorption_site_study import (
+    OER_adsorption_site_study
+) 
+
+from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
+    are_all_atoms_connected
 )
 
 
@@ -46,27 +47,25 @@ def test_is_adsorbate_near_site_detects_drift():
     study = _build_simple_on_top_study()
     O_atoms = study.get_atoms_for_O_calc()
 
-    assert is_adsorbate_near_site(
-        study,
-        O_atoms,
-        max_adsorbate_site_distance=0.2,
-    )
+    assert study.is_adsorbate_near_site(O_atoms)
 
     drifted_O_atoms = O_atoms.copy()
     drifted_O_atoms[1].position += np.array([0.0, 0.0, 2.0])
-    assert not is_adsorbate_near_site(
-        study, drifted_O_atoms, max_adsorbate_site_distance=1.0
-    )
+    assert not study.is_adsorbate_near_site(drifted_O_atoms)
 
 
 def test_is_OH_adsorbate_intact_detects_OH_drift_apart():
     study = _build_simple_on_top_study()
     O_atoms = study.get_atoms_for_O_calc()
-    study.set_relaxed_O_calc(O_atoms, energy=-2.0)
+    study.set_relaxed_O_calc(
+        O_atoms, 
+        energy=-2.0, 
+        require_magmom = False
+        )
 
     OH_atoms = study.get_OH_adsorbed_atoms()[0]
-    assert is_OH_adsorbate_intact(
-        study, OH_atoms, min_OH_distance=0.6, max_OH_distance=1.5
+    assert study.is_OH_adsorbate_intact(
+        OH_atoms, max_OH_distance=1.5
     )
 
     separated_OH_atoms = OH_atoms.copy()
@@ -77,7 +76,6 @@ def test_is_OH_adsorbate_intact_detects_OH_drift_apart():
     ][0]
     separated_OH_atoms[H_index].position += np.array([0.0, 0.0, 2.0])
 
-    assert not is_OH_adsorbate_intact(
-        study, separated_OH_atoms, min_OH_distance=0.6,
-        max_OH_distance=1.5
+    assert not study.is_OH_adsorbate_intact(
+       separated_OH_atoms, max_OH_distance=1.5
     )

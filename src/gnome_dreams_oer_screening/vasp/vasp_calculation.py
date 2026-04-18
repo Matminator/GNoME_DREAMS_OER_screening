@@ -6,13 +6,15 @@ import numpy as np
 from typing import Literal
 
 from ase import Atoms
+from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import read, Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
+from pymatgen.io.vasp import Vasprun, Incar as VaspIncar
 
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
-from custodian.vasp.handlers import ( 
+from custodian.vasp.handlers import (
     VaspErrorHandler,
     MeshSymmetryErrorHandler,
     UnconvergedErrorHandler,
@@ -20,24 +22,39 @@ from custodian.vasp.handlers import (
     PotimErrorHandler,
     PositiveEnergyErrorHandler,
     FrozenJobErrorHandler,
-    StdErrHandler,
-    LargeSigmaHandler,
-    IncorrectSmearingHandler,
-    KspacingMetalHandler,
-    PotimErrorHandler, # only relaxation handler
-    DriftErrorHandler, # only relaxation handler
-    WalltimeHandler
+    WalltimeHandler,
 )
 
 from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
     RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet)
 
+BULK_RELAXATION_HANDLERS = [
+    VaspErrorHandler(),           # master: 40+ runtime errors
+    MeshSymmetryErrorHandler(),   # k-mesh/Bravais lattice mismatch (bulk symmetry)
+    UnconvergedErrorHandler(),    # overall convergence fallback; ALGO ladder
+    NonConvergingErrorHandler(),  # persistent NELM failures; ALGO + mixing fix
+    PotimErrorHandler(),          # large ionic steps → reduce POTIM or switch IBRION
+    PositiveEnergyErrorHandler(), # pathological positive energy → ALGO fix
+    FrozenJobErrorHandler(),      # stalled HPC job → ALGO or SYMPREC change
+    WalltimeHandler(),            # graceful HPC wall-time shutdown via STOPCAR
+]
+
+SURFACE_RELAXATION_HANDLERS = [
+    VaspErrorHandler(),           # master: 40+ runtime errors
+    UnconvergedErrorHandler(),    # overall convergence fallback; ALGO ladder
+    NonConvergingErrorHandler(),  # persistent NELM failures; ALGO + mixing fix
+    PotimErrorHandler(),          # large ionic steps → reduce POTIM or switch IBRION
+    FrozenJobErrorHandler(),      # stalled HPC job → ALGO or SYMPREC change
+    WalltimeHandler(),            # graceful HPC wall-time shutdown via STOPCAR
+]
+
+
 def run_vasp_via_custodian(
-                directory, 
-                handlers = [VaspErrorHandler()],
-                vasp_cmd = ["mpiexec", "vasp_std"],
-                auto_npar = True,
-                max_errors = 20
+                directory,
+                handlers=None,
+                vasp_cmd=["mpiexec", "vasp_std"],
+                auto_npar=True,
+                max_errors=20,
                 ):
     """
     Run a VASP calculation in a specified directory using Custodian.
@@ -52,26 +69,93 @@ def run_vasp_via_custodian(
     before terminating the calculation.
     """
 
+    if handlers is None:
+        handlers = BULK_RELAXATION_HANDLERS
+
     if not os.path.exists(directory):
         raise FileNotFoundError(f"The directory {directory} does not" \
                                  " exist.")
 
     # save current working directory
-    cwd = os.getcwd() 
+    cwd = os.getcwd()
 
     # change to the VASP directory
     os.chdir(directory)
 
     # instantiate VASP job
-    job = VaspJob(vasp_cmd=vasp_cmd, auto_npar = auto_npar)
+    job = VaspJob(vasp_cmd=vasp_cmd, auto_npar=auto_npar)
 
     # run with custodian
-    c = Custodian(handlers=handlers, jobs=[job], 
-                  max_errors = max_errors)
+    c = Custodian(handlers=handlers, jobs=[job],
+                  max_errors=max_errors)
     c.run()
 
     # change back to the original directory
     os.chdir(cwd)
+
+
+def run_surface_vasp_two_stage(
+        directory,
+        handlers=None,
+        use_dipole_correction=True,
+        vasp_cmd=["mpiexec", "vasp_std"],
+        auto_npar=True,
+        max_errors=20,
+        ):
+    """Two-stage surface VASP: SCF pre-convergence, then full ionic relaxation with dipole correction.
+
+    Stage 1 — SCF only (NSW=0, no ionic steps), no dipole correction.
+    Stabilises the wavefunction before introducing the dipole sawtooth
+    potential, which can otherwise slow or destabilise SCF convergence
+    (VASP recommendation; see vasp.at/tutorials/latest/surface/part2).
+
+    Stage 2 — Full ionic relaxation with LDIPOL=True, IDIPOL=3, DIPOL set
+    to the structure centre of mass. Forces are dipole-corrected throughout
+    the relaxation, giving physically correct geometry and energy
+    (consistent with pymatgen MVLSlabSet auto_dipole=True).
+
+    Both stages run in the same Slurm job. Stage 2 restarts from the Stage 1
+    WAVECAR (ISTART=1), so the extra SCF cost of Stage 1 is small.
+
+    If use_dipole_correction=False the function falls back to a single
+    uncorrected ionic relaxation (equivalent to run_vasp_via_custodian).
+    """
+    if handlers is None:
+        handlers = SURFACE_RELAXATION_HANDLERS
+
+    directory = Path(directory)
+
+    if not use_dipole_correction:
+        run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+        return
+
+    # --- Stage 1: SCF pre-convergence without dipole correction ---
+    incar = VaspIncar.from_file(directory / "INCAR")
+    orig_nsw    = incar.get("NSW",    100)
+    orig_ibrion = incar.get("IBRION", 2)
+    incar["NSW"]    = 0   # no ionic steps
+    incar["IBRION"] = -1  # static
+    incar.write_file(directory / "INCAR")
+
+    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+
+    # --- Stage 2: full ionic relaxation with dipole correction ---
+    struct = Structure.from_file(directory / "POSCAR")
+    weights = [site.species.weight for site in struct]
+    dipol = np.average(struct.frac_coords, weights=weights, axis=0).tolist()
+
+    incar = VaspIncar.from_file(directory / "INCAR")
+    incar["NSW"]    = orig_nsw
+    incar["IBRION"] = orig_ibrion
+    incar["ISTART"] = 1      # restart from Stage 1 WAVECAR
+    incar["LDIPOL"] = True
+    incar["IDIPOL"] = 3
+    incar["DIPOL"]  = dipol
+    incar["AMIN"]   = 0.01   # dampen charge oscillations with LDIPOL active
+    incar.write_file(directory / "INCAR")
+
+    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+
 
 def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     """
@@ -87,7 +171,14 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     structures from the VASP calculation.
     """
 
-    directory = Path(directory)  # Ensure directory is a Path object
+    directory = Path(directory)
+
+    vr = Vasprun(directory / "vasprun.xml")
+    if not vr.converged_ionic:
+        raise RuntimeError(
+            f"VASP ionic relaxation not converged in {directory}. "
+            "Check if wall time was exceeded."
+        )
 
     atoms_list = read(directory / "vasprun.xml", index=":")
 
@@ -130,6 +221,18 @@ def clean_up_vasp_directory(
 
 
 def save_fake_results_to_traj(directory: Path, atoms: Atoms):
+    # Expose magmoms via a SinglePointCalculator so that
+    # atoms.get_magnetic_moments() works when the traj is read back.
+    # Uses initial_magmoms from the pymatgen structure conversion if
+    # available (set by enumerate_magnetic_structures via
+    # site_properties["magmom"]), otherwise falls back to zeros.
+    # This ensures the real magmom extraction pipeline is exercised in
+    # test/slurm_test mode without a VASP run.
+    if atoms.has('initial_magmoms'):
+        magmoms = atoms.get_initial_magnetic_moments()
+    else:
+        magmoms = [0.0] * len(atoms)
+    atoms.calc = SinglePointCalculator(atoms, magmoms=magmoms)
     out_traj = Trajectory(directory / "fake_result.traj", "w")
     out_traj.write(atoms)
     out_traj.close()

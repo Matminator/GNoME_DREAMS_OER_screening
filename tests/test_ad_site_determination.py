@@ -23,6 +23,18 @@ def test_cands_traj():
         pytest.fail("Slab generation failed")
     return traj
 
+def test_determine_adsorption_sites_rejects_atoms_input():
+    atoms = Atoms(
+        "TiO2",
+        positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        cell=[5, 5, 5],
+        pbc=True,
+    )
+    with pytest.raises(
+        AssertionError, match="Input surface must be a pymatgen Structure or Slab object"
+    ):
+        determine_adsorption_sites(atoms, normal_vector=np.array([0.0, 0.0, 1.0]))
+
 def test_sites_are_found(test_cands_traj):
     atoms = test_cands_traj[-1]
 

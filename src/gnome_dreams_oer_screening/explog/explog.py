@@ -23,6 +23,7 @@ class Explog:
         sleep_min = 2,
         reject_if_failed_exists: bool = False,
         require_relaxed_o_for_oh: bool = False,
+        magnetic_bulk_n_max: int = 4,
         ):
         """
         Initialize the experiment log and attached job handler.
@@ -90,15 +91,39 @@ class Explog:
         self.relational_frame = rf
         self.vasp_calculation_dir = vasp_calculation_dir
         self.job_handler = Job_handler(
-            rf, 
+            rf,
             vasp_calculation_dir,
-            mode = mode, 
-            prefix_vasp_dirs_with_prefix = prefix_vasp_dirs,
-            sleep_min = sleep_min,
-            reject_if_failed_exists = reject_if_failed_exists,
-            require_relaxed_o_for_oh = require_relaxed_o_for_oh)
+            mode=mode,
+            prefix_vasp_dirs_with_prefix=prefix_vasp_dirs,
+            sleep_min=sleep_min,
+            reject_if_failed_exists=reject_if_failed_exists,
+            require_relaxed_o_for_oh=require_relaxed_o_for_oh,
+            magnetic_bulk_n_max=magnetic_bulk_n_max,
+        )
         
-    def add_candidate(self, 
+    def _save_pickle(self) -> None:
+        payload = {
+            "candidates_df": self.relational_frame.candidates.df,
+            "processes_df": self.relational_frame.processes.df,
+        }
+        # Write to a temporary file first and then atomically replace
+        # the main file - This guards against data corruption if the 
+        # program crashes during writing.
+        tmp = self.vasp_calculation_dir / "explog.pkl.tmp"
+        dest = self.vasp_calculation_dir / "explog.pkl"
+        with open(tmp, "wb") as f:
+            pickle.dump(payload, f)
+        try:
+            os.replace(tmp, dest)
+        except PermissionError:
+            # os.replace is atomic on Linux HPC (where it matters).
+            # On Windows it can fail if the destination is locked by
+            # another handle; fall back to a non-atomic rename.
+            if dest.exists():
+                dest.unlink()
+            tmp.rename(dest)
+
+    def add_candidate(self,
                       candidate_id: str, 
                       study_obj: OER_catalyst_study,
                       reason_or_hypothesis: str | None = None, 
@@ -177,11 +202,9 @@ class Explog:
             require_relaxed_o_for_oh = require_relaxed_o_for_oh
             )
         
-        # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
-        with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
-            pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
+        self._save_pickle()
         return result
-        
+
     def submit_process(self, process_id: int | str,
         partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto']
         = 'auto') -> None:
@@ -194,17 +217,13 @@ class Explog:
                     "string that can be converted to an integer. Got " +
                     f"{process_id}.")
 
-        self.job_handler.submit_vasp_calculation(process_id, 
+        self.job_handler.submit_vasp_calculation(process_id,
                                                  partition=partition)
-        # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
-        with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
-            pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
+        self._save_pickle()
         
     def update_log(self):
         result = self.job_handler.update_log()
-        # save EXPLOG into a pickle file under WORKING_DIRECTORY for record and future reference
-        with open(self.vasp_calculation_dir / "explog.pkl", "wb") as f:
-            pickle.dump({"candidates_df":self.relational_frame.candidates.df, "processes_df":self.relational_frame.processes.df}, f)
+        self._save_pickle()
         return result
 
 EXPLOG = Explog()

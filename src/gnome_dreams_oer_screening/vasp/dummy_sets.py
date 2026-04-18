@@ -8,11 +8,13 @@ def get_dummy_settings():
         "GGA": "RP",
         "EDIFF": 1,
         "EDIFFG": 1,
+        "ISYM": 0,
         "ENCUT": 400,
         "IBRION": 2,
         "ISIF": 3,
         "ISMEAR": 0,
         "ISPIN": 2,
+        "MAGMOM": {},
         "LASPH": True,
         "LDAU": True,
         "LDAUJ": {

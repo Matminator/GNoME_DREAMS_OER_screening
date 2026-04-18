@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "GNoME_DREAMS_OER_screening"
-version = "0.5.4"
+version = "1.0.0"
 description = "TEMP"
 authors = [
     {name = "Mathias"},
@@ -13,9 +13,14 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "pymatgen", "ase", "pandas", "numpy", "seaborn", "custodian", 
+    "pymatgen", "spglib", "ase", "pandas", "numpy", "seaborn", "custodian",
     "pytest>=7", "pysqa", "mace-torch"
 ]
+# NOTE: magnetic structure enumeration also requires the 'enumlib' Fortran
+# binaries (enum.x, makestr.x) on PATH. These cannot be installed via pip.
+# On Linux/HPC: conda install -c conda-forge enumlib
+# Source: https://github.com/msg-byu/enumlib
+# Without enumlib, enumerate_magnetic_structures falls back to a single NM job.
 
 # [project.optional-dependencies]
 
@@ -33,9 +38,16 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 filterwarnings = [
-    "ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib.*"
+    "ignore:Set OLD_ERROR_HANDLING to false:DeprecationWarning:spglib.*",
+    "ignore:Not all sites have property tags:UserWarning:pymatgen.*",
+    "ignore:Not all sites have property wyckoff:UserWarning:pymatgen.*",
+    "ignore:Elements in POSCAR would be overwritten:UserWarning:pymatgen.*",
+    "ignore:Too many sites removed, please use a larger slab:UserWarning:pymatgen.*",
+    "ignore:ISMEAR = 0 with a small SIGMA:UserWarning:pymatgen.*",
+    "ignore:ISMEAR = 0 with a small SIGMA:pymatgen.io.vasp.sets.BadInputSetWarning",
 ]
 
 markers = [
-    "mini: marks fast tests for quick runs"
+    "mini: marks fast tests for quick runs",
+    "enumlib: marks tests that require enumlib binaries on PATH (Linux/HPC only)",
 ]

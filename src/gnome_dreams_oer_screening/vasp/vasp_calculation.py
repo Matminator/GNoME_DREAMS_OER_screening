@@ -205,7 +205,10 @@ def clean_up_vasp_directory(
         targets = list(dir_path.iterdir())
     else:
         if files_to_remove is None:
-            files_to_remove = ["POTCAR", "WAVECAR", "CHGCAR"]
+            files_to_remove = [
+                "POTCAR", "WAVECAR", "CHGCAR", "DOSCAR", "PROCAR", 
+                'DOSCAR', 'CHG', 'POTCAR.orig', 'OUTCAR'
+                ]
         # Collect all files that match any of the specified substrings
         targets = [
             file for file in dir_path.iterdir()

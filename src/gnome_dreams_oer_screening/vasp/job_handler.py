@@ -503,7 +503,7 @@ class Job_handler():
 
                 if partition == 'auto':
                     # NOTE, could make a smart auto-partition
-                    if len(init_structure) < 100:
+                    if len(init_structure) < 85:
                         partition = 'xeon40el8'
                     else:
                         partition = 'xeon56'

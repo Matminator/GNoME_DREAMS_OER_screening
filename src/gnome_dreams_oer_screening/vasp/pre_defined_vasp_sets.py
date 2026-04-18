@@ -94,6 +94,6 @@ class TestRelaxSet(VaspInputSet):
     CONFIG = get_dummy_settings()
     def __init__(self, structure, **kwargs):
         self.CONFIG["KPOINTS"] = heuristic_compute_kpoints(
-            structure, structure_type='N/A', kpts_nominator=0.01
+            structure, structure_type='N/A', kpts_nominator=0.0001
             )
         super().__init__(structure=structure, **kwargs)

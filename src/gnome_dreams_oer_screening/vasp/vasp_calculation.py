@@ -1,6 +1,5 @@
 
 import os
-import shutil
 from pathlib import Path
 from time import time
 import numpy as np
@@ -103,31 +102,56 @@ def run_surface_vasp_two_stage(
         auto_npar=True,
         max_errors=20,
         ):
-    """Two-stage surface VASP: geometry relaxation, then optional single-point with dipole correction.
+    """Two-stage surface VASP: SCF pre-convergence, then full ionic relaxation with dipole correction.
 
-    Stage 1 relaxes the geometry without dipole correction (cheaper per step).
-    Stage 2 runs a static calculation with LDIPOL=True, IDIPOL=3 on the relaxed
-    geometry to obtain the electrostatically corrected energy.
-    Both stages run within the same Slurm job.
+    Stage 1 — SCF only (NSW=0, no ionic steps), no dipole correction.
+    Stabilises the wavefunction before introducing the dipole sawtooth
+    potential, which can otherwise slow or destabilise SCF convergence
+    (VASP recommendation; see vasp.at/tutorials/latest/surface/part2).
+
+    Stage 2 — Full ionic relaxation with LDIPOL=True, IDIPOL=3, DIPOL set
+    to the structure centre of mass. Forces are dipole-corrected throughout
+    the relaxation, giving physically correct geometry and energy
+    (consistent with pymatgen MVLSlabSet auto_dipole=True).
+
+    Both stages run in the same Slurm job. Stage 2 restarts from the Stage 1
+    WAVECAR (ISTART=1), so the extra SCF cost of Stage 1 is small.
+
+    If use_dipole_correction=False the function falls back to a single
+    uncorrected ionic relaxation (equivalent to run_vasp_via_custodian).
     """
     if handlers is None:
         handlers = SURFACE_RELAXATION_HANDLERS
 
-    # Stage 1: geometry relaxation without dipole correction
-    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+    directory = Path(directory)
 
     if not use_dipole_correction:
+        run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
         return
 
-    # Stage 2: static calculation with dipole correction on relaxed geometry
-    directory = Path(directory)
-    shutil.copy(directory / "CONTCAR", directory / "POSCAR")
+    # --- Stage 1: SCF pre-convergence without dipole correction ---
+    incar = VaspIncar.from_file(directory / "INCAR")
+    orig_nsw    = incar.get("NSW",    100)
+    orig_ibrion = incar.get("IBRION", 2)
+    incar["NSW"]    = 0   # no ionic steps
+    incar["IBRION"] = -1  # static
+    incar.write_file(directory / "INCAR")
+
+    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+
+    # --- Stage 2: full ionic relaxation with dipole correction ---
+    struct = Structure.from_file(directory / "POSCAR")
+    weights = [site.species.weight for site in struct]
+    dipol = np.average(struct.frac_coords, weights=weights, axis=0).tolist()
 
     incar = VaspIncar.from_file(directory / "INCAR")
+    incar["NSW"]    = orig_nsw
+    incar["IBRION"] = orig_ibrion
+    incar["ISTART"] = 1      # restart from Stage 1 WAVECAR
     incar["LDIPOL"] = True
     incar["IDIPOL"] = 3
-    incar["NSW"] = 0      # single-point: energy only
-    incar["IBRION"] = -1  # static
+    incar["DIPOL"]  = dipol
+    incar["AMIN"]   = 0.01   # dampen charge oscillations with LDIPOL active
     incar.write_file(directory / "INCAR")
 
     run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)

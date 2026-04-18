@@ -70,14 +70,21 @@ class OER_surface_study:
         "OOH": 3.69,
     }
 
-    def __init__(self, 
+    def __init__(self,
                  OER_catalyst_study,
                  input_surface: Slab,
                  normal_vector: np.ndarray | None = None,
                  fixed_bottom_half: bool = True, vacuum: float = 14
                  ):
 
-        # Make sure that the surface is on the form of an ASE Atoms 
+        if not isinstance(input_surface, Slab):
+            raise ValueError(
+                f"input_surface must be a Slab, got {type(input_surface).__name__}. "
+                "Slab generation may have failed for this termination "
+                "(stoichiometry check, timeout, or layer limit)."
+            )
+
+        # Make sure that the surface is on the form of an ASE Atoms
         # object and an np.array containing the normal vector:
         base_surface, surface_normal = get_atoms_and_normal_from_input(
                                             input_surface, normal_vector

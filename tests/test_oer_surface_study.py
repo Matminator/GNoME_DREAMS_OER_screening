@@ -25,6 +25,7 @@ from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
 )
 from gnome_dreams_oer_screening.oer.oer_surface_study import (
+    OER_surface_study,
     SurfaceStudyLockedError,
 )
 from gnome_dreams_oer_screening.oer.atoms_sanity_checks import (
@@ -457,6 +458,15 @@ def test_adsorbtion_update_O_adsorption_energies(TiO2_r_init_surface_study):
 # ---------------------------------------------------------------------------
 # set_relaxed_base_surface error / locking tests
 # ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_oer_surface_study_raises_for_non_slab_input(TiO2_r_bulk):
+    """OER_surface_study.__init__ must reject non-Slab input (§3f guard)."""
+    _, oer_study = TiO2_r_bulk
+    for bad_input in (None, "not_a_slab", 42):
+        with pytest.raises(ValueError, match="must be a Slab"):
+            OER_surface_study(oer_study, bad_input)
+
 
 def test_set_relaxed_base_surface_raises_structure_consistency_error(TiO2_r_bulk):
     atoms, _ = TiO2_r_bulk

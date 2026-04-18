@@ -50,21 +50,17 @@ _needs_traj = pytest.mark.skipif(not _TRAJ.exists(), reason="test_cands.traj not
 
 
 def _enumlib_available() -> bool:
-    """Return True if the required enumlib executables are on PATH."""
-    has_enum = (
+    """Return True if an enumlib binary is on PATH."""
+    return (
         shutil.which("enum.x") is not None
         or shutil.which("multienum.x") is not None
+        or shutil.which("multinum.x") is not None
     )
-    has_make = (
-        shutil.which("makestr.x") is not None
-        or shutil.which("makeStr.py") is not None
-    )
-    return has_enum and has_make
 
 
 needs_enumlib = pytest.mark.skipif(
     not _enumlib_available(),
-    reason="enumlib binaries (enum.x / makestr.x) not found on PATH",
+    reason="enumlib binary (enum.x / multinum.x) not found on PATH",
 )
 
 

@@ -34,7 +34,7 @@ class Job_handler():
         "overpotential from OH-OOH scaling relation",
     ]
 
-    def __init__(self, 
+    def __init__(self,
         rframe: RelationalFrame,
         vasp_calculation_dir: Path,
         mode: Literal["test", "slurm_test", 'MLIP_test',
@@ -44,6 +44,7 @@ class Job_handler():
         reject_if_failed_exists: bool = False,
         require_relaxed_o_for_oh: bool = False,
         magnetic_bulk_n_max: int = 4,
+        use_dipole_correction: bool = True,
         ) -> None:
 
         # Create the directory if it doesn't exist
@@ -53,6 +54,7 @@ class Job_handler():
         self.vasp_dir = vasp_calculation_dir
         self.rframe = rframe
         self.mode = mode
+        self.use_dipole_correction = use_dipole_correction
         self.calc_setup = calculational_setup(mode=mode)
 
         current_dir = Path(__file__).resolve().parent
@@ -479,10 +481,24 @@ class Job_handler():
                 )
 
             else:
-                run_vasp_script = package_root / "vasp" / "run_vasp.py"
-                if not run_vasp_script.exists():
-                    raise FileNotFoundError(
-                        f"run_vasp script not found: {run_vasp_script}"
+                if job_type == 'bulk_relaxation':
+                    run_vasp_script = package_root / "vasp" / "run_vasp.py"
+                    if not run_vasp_script.exists():
+                        raise FileNotFoundError(
+                            f"run_vasp script not found: {run_vasp_script}"
+                        )
+                    submit_command = (
+                        f'python3 "{run_vasp_script}" "{calc_dir.resolve()}"'
+                    )
+                else:  # surface_relaxation, O_adsorption, OH_adsorption
+                    run_vasp_surface_script = package_root / "vasp" / "run_vasp_surface.py"
+                    if not run_vasp_surface_script.exists():
+                        raise FileNotFoundError(
+                            f"run_vasp_surface script not found: {run_vasp_surface_script}"
+                        )
+                    submit_command = (
+                        f'python3 "{run_vasp_surface_script}" "{calc_dir.resolve()}" '
+                        f'{self.use_dipole_correction}'
                     )
 
                 if partition == 'auto':
@@ -491,7 +507,7 @@ class Job_handler():
                         partition = 'xeon40el8'
                     else:
                         partition = 'xeon56'
-                
+
                 if partition == 'xeon56':
                     cores, nodes = 56, 1
                 elif partition == 'xeon40el8':
@@ -503,9 +519,6 @@ class Job_handler():
                                      f"recognized.")
 
                 walltime = "50:00:00"
-                submit_command = (
-                    f'python3 "{run_vasp_script}" "{calc_dir.resolve()}"'
-                )
 
             slurm_id = self.queueadapter.submit_job(
                 command = submit_command,

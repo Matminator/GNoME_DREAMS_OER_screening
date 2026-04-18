@@ -1,5 +1,6 @@
 
 import os
+import shutil
 from pathlib import Path
 from time import time
 import numpy as np
@@ -10,10 +11,11 @@ from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import read, Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
+from pymatgen.io.vasp import Vasprun, Incar as VaspIncar
 
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
-from custodian.vasp.handlers import ( 
+from custodian.vasp.handlers import (
     VaspErrorHandler,
     MeshSymmetryErrorHandler,
     UnconvergedErrorHandler,
@@ -21,24 +23,39 @@ from custodian.vasp.handlers import (
     PotimErrorHandler,
     PositiveEnergyErrorHandler,
     FrozenJobErrorHandler,
-    StdErrHandler,
-    LargeSigmaHandler,
-    IncorrectSmearingHandler,
-    KspacingMetalHandler,
-    PotimErrorHandler, # only relaxation handler
-    DriftErrorHandler, # only relaxation handler
-    WalltimeHandler
+    WalltimeHandler,
 )
 
 from gnome_dreams_oer_screening.vasp.pre_defined_vasp_sets import (
     RPBE_relax_bulk_set, RPBE_relax_surface_set, TestRelaxSet)
 
+BULK_RELAXATION_HANDLERS = [
+    VaspErrorHandler(),           # master: 40+ runtime errors
+    MeshSymmetryErrorHandler(),   # k-mesh/Bravais lattice mismatch (bulk symmetry)
+    UnconvergedErrorHandler(),    # overall convergence fallback; ALGO ladder
+    NonConvergingErrorHandler(),  # persistent NELM failures; ALGO + mixing fix
+    PotimErrorHandler(),          # large ionic steps → reduce POTIM or switch IBRION
+    PositiveEnergyErrorHandler(), # pathological positive energy → ALGO fix
+    FrozenJobErrorHandler(),      # stalled HPC job → ALGO or SYMPREC change
+    WalltimeHandler(),            # graceful HPC wall-time shutdown via STOPCAR
+]
+
+SURFACE_RELAXATION_HANDLERS = [
+    VaspErrorHandler(),           # master: 40+ runtime errors
+    UnconvergedErrorHandler(),    # overall convergence fallback; ALGO ladder
+    NonConvergingErrorHandler(),  # persistent NELM failures; ALGO + mixing fix
+    PotimErrorHandler(),          # large ionic steps → reduce POTIM or switch IBRION
+    FrozenJobErrorHandler(),      # stalled HPC job → ALGO or SYMPREC change
+    WalltimeHandler(),            # graceful HPC wall-time shutdown via STOPCAR
+]
+
+
 def run_vasp_via_custodian(
-                directory, 
-                handlers = [VaspErrorHandler()],
-                vasp_cmd = ["mpiexec", "vasp_std"],
-                auto_npar = True,
-                max_errors = 20
+                directory,
+                handlers=None,
+                vasp_cmd=["mpiexec", "vasp_std"],
+                auto_npar=True,
+                max_errors=20,
                 ):
     """
     Run a VASP calculation in a specified directory using Custodian.
@@ -53,26 +70,68 @@ def run_vasp_via_custodian(
     before terminating the calculation.
     """
 
+    if handlers is None:
+        handlers = BULK_RELAXATION_HANDLERS
+
     if not os.path.exists(directory):
         raise FileNotFoundError(f"The directory {directory} does not" \
                                  " exist.")
 
     # save current working directory
-    cwd = os.getcwd() 
+    cwd = os.getcwd()
 
     # change to the VASP directory
     os.chdir(directory)
 
     # instantiate VASP job
-    job = VaspJob(vasp_cmd=vasp_cmd, auto_npar = auto_npar)
+    job = VaspJob(vasp_cmd=vasp_cmd, auto_npar=auto_npar)
 
     # run with custodian
-    c = Custodian(handlers=handlers, jobs=[job], 
-                  max_errors = max_errors)
+    c = Custodian(handlers=handlers, jobs=[job],
+                  max_errors=max_errors)
     c.run()
 
     # change back to the original directory
     os.chdir(cwd)
+
+
+def run_surface_vasp_two_stage(
+        directory,
+        handlers=None,
+        use_dipole_correction=True,
+        vasp_cmd=["mpiexec", "vasp_std"],
+        auto_npar=True,
+        max_errors=20,
+        ):
+    """Two-stage surface VASP: geometry relaxation, then optional single-point with dipole correction.
+
+    Stage 1 relaxes the geometry without dipole correction (cheaper per step).
+    Stage 2 runs a static calculation with LDIPOL=True, IDIPOL=3 on the relaxed
+    geometry to obtain the electrostatically corrected energy.
+    Both stages run within the same Slurm job.
+    """
+    if handlers is None:
+        handlers = SURFACE_RELAXATION_HANDLERS
+
+    # Stage 1: geometry relaxation without dipole correction
+    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+
+    if not use_dipole_correction:
+        return
+
+    # Stage 2: static calculation with dipole correction on relaxed geometry
+    directory = Path(directory)
+    shutil.copy(directory / "CONTCAR", directory / "POSCAR")
+
+    incar = VaspIncar.from_file(directory / "INCAR")
+    incar["LDIPOL"] = True
+    incar["IDIPOL"] = 3
+    incar["NSW"] = 0      # single-point: energy only
+    incar["IBRION"] = -1  # static
+    incar.write_file(directory / "INCAR")
+
+    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+
 
 def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     """
@@ -88,7 +147,14 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     structures from the VASP calculation.
     """
 
-    directory = Path(directory)  # Ensure directory is a Path object
+    directory = Path(directory)
+
+    vr = Vasprun(directory / "vasprun.xml")
+    if not vr.converged_ionic:
+        raise RuntimeError(
+            f"VASP ionic relaxation not converged in {directory}. "
+            "Check if wall time was exceeded."
+        )
 
     atoms_list = read(directory / "vasprun.xml", index=":")
 

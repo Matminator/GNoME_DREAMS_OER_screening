@@ -22,4 +22,4 @@ source /home/energy/matnis/projects/dreams_colab/material_agent/venv2/bin/activa
 which enum.x
 which makestr.x
 
-python3 tests/hpc_workflow_tryout.py slurm_test
+python3 tests/hpc_workflow_tryout.py MLIP_test

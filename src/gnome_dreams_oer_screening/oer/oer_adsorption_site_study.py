@@ -594,10 +594,16 @@ class OER_adsorption_site_study:
                     "If provided, energies must have the same length " \
                     "as atoms_list."
                 )
-            structure_energy_pairs = [
-                (atoms.copy(), float(E))
-                for atoms, E in zip(atoms_list, energies)
-            ]
+            structure_energy_pairs = []
+            for atoms, E in zip(atoms_list, energies):
+                atoms_c = atoms.copy()
+                if atoms.calc is not None:
+                    try:
+                        atoms_c.info['_magmoms'] = \
+                            atoms.get_magnetic_moments().tolist()
+                    except Exception:
+                        pass
+                structure_energy_pairs.append((atoms_c, float(E)))
         else:
             structure_energy_pairs = []
             for atoms in atoms_list:
@@ -608,7 +614,14 @@ class OER_adsorption_site_study:
                         "Energy not provided and could not be "
                         "obtained from the relaxed atoms object."
                     )
-                structure_energy_pairs.append((atoms.copy(), E))
+                atoms_c = atoms.copy()
+                if atoms.calc is not None:
+                    try:
+                        atoms_c.info['_magmoms'] = \
+                            atoms.get_magnetic_moments().tolist()
+                    except Exception:
+                        pass
+                structure_energy_pairs.append((atoms_c, E))
 
         # --- run baseline sanity checks on atoms, in atoms_list: ------
         for atoms, _ in structure_energy_pairs:
@@ -665,8 +678,8 @@ class OER_adsorption_site_study:
             self.accepted_relaxed_OH_pairs,
             key=lambda pair: pair[1],
         )
-        if best_atoms.calc is not None:
-            self._relaxed_OH_magmom = best_atoms.get_magnetic_moments().tolist()
+        if '_magmoms' in best_atoms.info:
+            self._relaxed_OH_magmom = best_atoms.info['_magmoms']
         self.relaxed_OH_atoms = best_atoms.copy()
         self.energies_dict['OH_adsorbed_energy'] = best_energy
 

@@ -304,9 +304,14 @@ for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_stud
           f"{o_calc[:5]}", flush=True)
 
 # ── MAGMOM: OH init magmoms before OH adsorption ─────────────────────────────
+# OH_init_atoms is not yet populated (set by add_process), so derive expected
+# lengths: on-top = len(relaxed O atoms) + 1 (H), lattice-O = len(surface) + 1.
 for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
     oh_init = ad_st.get_OH_init_magmom()
-    n_OH = len(ad_st.OH_init_atoms[0])
+    if ad_st.site_type == 'on-top':
+        n_OH = len(ad_st.get_O_calc_magmom()) + 1
+    else:
+        n_OH = len(surface_study.get_relaxed_surface_magmom()) + 1
     check(oh_init is not None,
           f"{site_label}: OH init magmom must be available before OH_adsorption")
     check(len(oh_init) == n_OH,

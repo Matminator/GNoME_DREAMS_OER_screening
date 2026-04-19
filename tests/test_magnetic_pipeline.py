@@ -15,6 +15,8 @@
 #              get_O_init_magmom length and value checks
 #   Phase 6  — O_adsorption (test mode) → _relaxed_O_magmom injected,
 #              get_OH_init_magmom length and value checks for all site types
+#   Phase 7  — OH_adsorption (test mode) → get_OH_calc_magmom() non-None,
+#              length and value checks; exercises info['_magmoms'] carrier
 #
 # Production-mode pipeline (mode='production', monkeypatched VASP/SLURM):
 #   test_production_mode_full_pipeline_fe    — magnetic material (Fe),
@@ -614,6 +616,63 @@ def _run_magnetic_bulk_pipeline(
                     f"Site {site_idx} lattice-O: slab portion must contain non-zero magmoms"
                 )
 
+    # -----------------------------------------------------------------------
+    # Phase 7 — OH_adsorption (test mode) + OH calc magmom check.
+    # get_OH_calc_magmom() reads _relaxed_OH_magmom, which is populated via
+    # the info['_magmoms'] carrier that stashes magmoms through atoms.copy()
+    # inside set_relaxed_OH_calc.  In test mode the fake traj initial_magmoms
+    # equal the OH init magmoms set on the pymatgen structure, so we can
+    # assert concrete value equality between oh_calc and oh_init.
+    # -----------------------------------------------------------------------
+    for site_idx in ad_site_dict.keys():
+        pids = EXPLOG.add_process(
+            candidate_id=cand_id,
+            calculation_type="OH_adsorption",
+            termination_index=termination_index,
+            site_index=site_idx,
+        )
+        for p in pids:
+            EXPLOG.submit_process(process_id=p)
+
+    EXPLOG.update_log()
+
+    for site_idx, ad_study in ad_site_dict.items():
+        site_type = ad_study.site_type
+        oh_calc = ad_study.get_OH_calc_magmom()
+        n_OH = len(ad_study.relaxed_OH_atoms)
+
+        assert oh_calc is not None, (
+            f"Site {site_idx} {site_type}: get_OH_calc_magmom() must be non-None "
+            "after OH_adsorption — info['_magmoms'] carrier must survive "
+            "atoms.copy() in set_relaxed_OH_calc"
+        )
+        assert len(oh_calc) == n_OH, (
+            f"Site {site_idx} {site_type}: OH calc magmom length {len(oh_calc)} "
+            f"must equal relaxed_OH_atoms atom count {n_OH}"
+        )
+
+        o_calc = ad_study.get_O_calc_magmom()
+        if site_type == 'on-top':
+            # In test mode: oh_init = o_calc + [0.0 for H], fake traj stores
+            # initial_magmoms = oh_init, so oh_calc == oh_init.
+            assert oh_calc[:slab_n + 1] == pytest.approx(o_calc, abs=1e-6), (
+                f"Site {site_idx} on-top: slab+O portion of OH calc magmom "
+                f"must equal O calc magmom. "
+                f"Got {oh_calc[:slab_n+1]} vs {o_calc}"
+            )
+            assert oh_calc[-1] == pytest.approx(0.0, abs=1e-6), (
+                f"Site {site_idx} on-top: last entry (H) of OH calc magmom must be 0.0"
+            )
+        elif site_type == 'lattice O':
+            # In test mode: oh_init = slab_magmom + [0.0 for H].
+            assert oh_calc[:slab_n] == pytest.approx(slab_magmom, abs=1e-6), (
+                f"Site {site_idx} lattice-O: slab portion of OH calc magmom "
+                f"must equal slab_magmom. Got {oh_calc[:slab_n]} vs {slab_magmom}"
+            )
+            assert oh_calc[-1] == pytest.approx(0.0, abs=1e-6), (
+                f"Site {site_idx} lattice-O: last entry (H) of OH calc magmom must be 0.0"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -908,6 +967,25 @@ def test_production_mode_full_pipeline_fe(tmp_path, fe_bcc_atoms, monkeypatch):
             f"Site {site_idx}: relaxed_OH_atoms must be stored after "
             "OH_adsorption completes in production mode"
         )
+        oh_calc = ad_study.get_OH_calc_magmom()
+        assert oh_calc is not None, (
+            f"Site {site_idx}: get_OH_calc_magmom() must be non-None in "
+            "production mode — real calculator path in set_relaxed_OH_calc"
+        )
+        assert len(oh_calc) == len(ad_study.relaxed_OH_atoms), (
+            f"Site {site_idx}: OH calc magmom length must equal "
+            f"relaxed_OH_atoms atom count ({len(ad_study.relaxed_OH_atoms)}), "
+            f"got {len(oh_calc)}"
+        )
+        if ad_study.site_type == 'on-top':
+            # O and H are not in _FAKE_MAGMOMS_BY_ELEMENT → 0.0; Fe atoms → 5.0
+            assert any(abs(m) > 0.1 for m in oh_calc[:-1]), (
+                f"Site {site_idx} on-top: slab+O portion must contain "
+                f"non-zero Fe magmoms from fake calculator, got {oh_calc}"
+            )
+            assert oh_calc[-1] == pytest.approx(0.0, abs=0.1), (
+                f"Site {site_idx} on-top: last entry (H) must be 0.0, got {oh_calc[-1]}"
+            )
 
 
 @needs_enumlib

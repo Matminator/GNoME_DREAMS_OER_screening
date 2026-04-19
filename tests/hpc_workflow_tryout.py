@@ -27,9 +27,9 @@ H2_GFE          = -6.77
 
 # ─── Per-mode configuration ─────────────────────────────────────────────────────
 _CFG = {
-    "slurm_test":      {"sleep_sec": 20,  "sleep_min": 0.25 },
+    "slurm_test":      {"sleep_sec": 10,  "sleep_min": 0.25 },
     "MLIP_test":       {"sleep_sec": 20,  "sleep_min": 2  },
-    "production_test": {"sleep_sec": 180, "sleep_min": 2  },
+    "production_test": {"sleep_sec": 30, "sleep_min": 2  },
     "production":      {"sleep_sec": 180, "sleep_min": 2  },
 }
 SLEEP_SEC = _CFG[MODE]["sleep_sec"]

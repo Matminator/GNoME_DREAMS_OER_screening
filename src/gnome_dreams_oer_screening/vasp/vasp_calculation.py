@@ -10,7 +10,7 @@ from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import Trajectory
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
-from pymatgen.io.vasp import Vasprun, Incar as VaspIncar
+from pymatgen.io.vasp import Vasprun, Outcar, Incar as VaspIncar
 
 from custodian.custodian import Custodian
 from custodian.vasp.jobs import VaspJob
@@ -160,16 +160,18 @@ def run_surface_vasp_two_stage(
 def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     """Read VASP results using pymatgen, then return ASE Atoms objects.
 
-    Uses pymatgen's Vasprun rather than ASE's reader. ASE's vasprun.xml
-    reader silently omits magnetic moments for LORBIT<10 (written as
-    <varray name="magnetization">). Pymatgen's _parse_ionic_step captures
-    all <varray> elements per ionic step, including magnetization, and
-    stores them in ionic_steps[i]["magnetization"] as list[list[float]]
-    (one inner list per atom, one float per atom for collinear ISPIN=2).
+    Energy and structure are read from vasprun.xml via pymatgen's Vasprun.
+    Per-atom magnetic moments are read from OUTCAR via pymatgen's Outcar.
 
-    Requires LORBIT=1 in INCAR. LORBIT=11 writes <array name="magnetization">
-    instead, which _parse_ionic_step does NOT capture — ionic_steps would
-    then have no "magnetization" key and this function raises RuntimeError.
+    Requires LORBIT=11 in INCAR. LORBIT=11 always writes the
+    "magnetization (x)" block to OUTCAR for every ionic relaxation —
+    including non-magnetic materials (e.g. TiO2) where all moments are zero.
+    This is more reliable than reading from vasprun.xml, where VASP omits
+    <varray name="magnetization"> when moments converge to zero.
+
+    Per-step magmoms are only available for the final step (OUTCAR records
+    only the last magnetization block). When return_only_final=False,
+    intermediate steps carry zero magmoms; only the final Atoms has real magmoms.
 
     Parameters:
     directory (str): The directory where the VASP calculation was run.
@@ -189,27 +191,28 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
             "Check if wall time was exceeded."
         )
 
-    def _step_to_atoms(step, energy):
-        mag_data = step.get("magnetization")
-        if not mag_data:
-            raise RuntimeError(
-                f"No per-atom magnetization in {directory}/vasprun.xml. "
-                "Ensure LORBIT < 10 is set in INCAR. (only ever tested for LORBIT=1"
-            )
-        # _parse_vasp_array returns list[list[float]]; for collinear ISPIN=2
-        # each inner list has one element: the total moment for that atom.
-        magmoms = [m[0] for m in mag_data]
+    outcar = Outcar(directory / "OUTCAR")
+    # outcar.magnetization: tuple[dict[str, float]], one dict per atom,
+    # keys "s", "p", "d", "tot" — from the last magnetization block in OUTCAR.
+    final_magmoms = [site["tot"] for site in outcar.magnetization]
+
+    def _step_to_atoms(step, energy, magmoms):
         atoms = AseAtomsAdaptor.get_atoms(step["structure"])
         atoms.calc = SinglePointCalculator(atoms, energy=energy, magmoms=magmoms)
         return atoms
 
-    if return_only_final:
-        return [_step_to_atoms(vr.ionic_steps[-1], vr.final_energy)]
+    n_atoms = len(vr.ionic_steps[-1]["structure"])
 
-    return [
-        _step_to_atoms(step, step["e_0_energy"])
-        for step in vr.ionic_steps
+    if return_only_final:
+        return [_step_to_atoms(vr.ionic_steps[-1], vr.final_energy, final_magmoms)]
+
+    # Intermediate steps: magmoms not available from OUTCAR per-step.
+    result = [
+        _step_to_atoms(step, step["e_0_energy"], [0.0] * n_atoms)
+        for step in vr.ionic_steps[:-1]
     ]
+    result.append(_step_to_atoms(vr.ionic_steps[-1], vr.final_energy, final_magmoms))
+    return result
 
 def clean_up_vasp_directory(
     directory: str, files_to_remove: list[str] = None,

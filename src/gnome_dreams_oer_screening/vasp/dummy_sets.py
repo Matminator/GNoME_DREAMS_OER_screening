@@ -31,7 +31,7 @@ def get_dummy_settings():
             "O": {"Co": 3.32, "Cr": 3.7, "Fe": 5.3, "Mn": 3.9, "Mo": 4.38, "Ni": 6.2, "V": 3.25, "W": 6.2},
         },
         "LDAUPRINT": 1,
-        "LORBIT": 1,
+        "LORBIT": 11,
         "LREAL": "AUTO",
         "LWAVE": False,
         "NELM": 100,

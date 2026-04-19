@@ -391,12 +391,8 @@ class Job_handler():
                         )
                     init_atoms = ad_study.get_atoms_for_O_calc()
                     init_structure = AseAtomsAdaptor.get_structure(init_atoms)
-                    # get_O_init_magmom handles per-site-type atom count:
-                    #   on-top:    slab magmoms + [0.0] for added O
-                    #   lattice-O: slab magmoms minus removed lattice-O entry
-                    slab_magmom = surface_study.get_slab_magmom()
-                    if slab_magmom is not None:
-                        o_magmom = ad_study.get_O_init_magmom(slab_magmom)
+                    o_magmom = ad_study.get_O_init_magmom()
+                    if o_magmom is not None:
                         for site, m in zip(init_structure.sites, o_magmom):
                             site.properties["magmom"] = m
                 elif job_type == 'OH_adsorption':
@@ -427,9 +423,7 @@ class Job_handler():
                         )
                     init_atoms = oh_candidates[oh_init_index]
                     init_structure = AseAtomsAdaptor.get_structure(init_atoms)
-                    oh_magmom = ad_study.get_OH_init_magmom(
-                        surface_study.get_relaxed_surface_magmom()
-                    )
+                    oh_magmom = ad_study.get_OH_init_magmom()
                     if oh_magmom is not None:
                         for site, m in zip(init_structure.sites, oh_magmom):
                             site.properties["magmom"] = m
@@ -904,6 +898,13 @@ class Job_handler():
                             surface_so.set_relaxed_base_surface(
                                 atoms, E, require_magmom=False
                             )
+                            # Test-mode: no VASP calculator → _relaxed_surface_magmom
+                            # stays None. Inject slab magmoms as stand-in so
+                            # get_O/OH_init_magmom work in test/slurm_test mode.
+                            if surface_so._relaxed_surface_magmom is None:
+                                _slab_m = surface_so.get_slab_magmom()
+                                if _slab_m is not None:
+                                    surface_so._relaxed_surface_magmom = _slab_m
                         else:
                             ad_site_dict = surface_so.\
                                 get_adsorption_site_studies_dict()
@@ -917,10 +918,9 @@ class Job_handler():
                                 # exercisable in test mode. Mirrors the
                                 # bulk_relaxation fix (_get_config_magmom).
                                 if ad_study._relaxed_O_magmom is None:
-                                    _slab_m = surface_so.get_slab_magmom()
-                                    if _slab_m is not None:
-                                        ad_study._relaxed_O_magmom = \
-                                            ad_study.get_O_init_magmom(_slab_m)
+                                    o_init = ad_study.get_O_init_magmom()
+                                    if o_init is not None:
+                                        ad_study._relaxed_O_magmom = o_init
                             elif job_type == 'OH_adsorption':
                                 ad_study.set_relaxed_OH_calc(
                                     atoms, energies=[E]
@@ -1014,20 +1014,9 @@ class Job_handler():
                                 self._update_candidate_oer_metrics(
                                     candt_id
                                 )
-                            else:
-                                # NOTE:
                                 # Keep OH process rows unchanged until
                                 # all OH jobs for this site are
-                                # terminal. Re-enable if per-process
-                                # partial snapshots are needed.
-
-                                # self._update_process_oer_metrics(
-                                #     process_id,
-                                #     candt_id,
-                                #     termination_index,
-                                #     site_index,
-                                # )
-                                pass
+                                # terminal.
                         continue
 
                 else:

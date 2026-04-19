@@ -91,11 +91,12 @@ class OER_adsorption_site_study:
             (interpreted differently per site type as described above).
     """
 
-    def __init__(self, init_surface: Atoms, 
-                 init_add_position: np.ndarray, 
+    def __init__(self, init_surface: Atoms,
+                 init_add_position: np.ndarray,
                  site_index: int,
                  surface_normal: np.ndarray,
-                 init: tuple[str, float]
+                 init: tuple[str, float],
+                 surface_study=None,
                  ):
         
         init_surface = init_surface.copy()
@@ -126,6 +127,8 @@ class OER_adsorption_site_study:
         self._relaxed_O_magmom: list[float] | None = None
         self.OH_init_atoms = None
         self.relaxed_OH_atoms = None
+        self._relaxed_OH_magmom: list[float] | None = None
+        self._surface_study = surface_study
         self.accepted_relaxed_OH_pairs = []
         # Direct/manual workflows can expose OH-derived metrics
         # immediately, while asynchronous Job_handler workflows can
@@ -365,46 +368,48 @@ class OER_adsorption_site_study:
             return list(self._relaxed_O_magmom)
         return None
 
-    def get_O_init_magmom(self, slab_magmom: list[float]) -> list[float]:
-        """Initial MAGMOM list for the O adsorption VASP run, from slab magmoms.
+    def get_OH_calc_magmom(self) -> list[float] | None:
+        """Per-atom magmoms from the relaxed OH-stage structure (post-VASP).
+        Returns None if set_relaxed_OH_calc hasn't been called or had no calculator."""
+        if self._relaxed_OH_magmom is not None:
+            return list(self._relaxed_OH_magmom)
+        return None
 
-        on-top:    slab magmoms + [0.0] for the added O adsorbate.
-        lattice-O: slab magmoms minus the entry for the removed lattice-O atom.
+    def get_O_init_magmom(self) -> list[float] | None:
+        """Initial MAGMOM list for the O adsorption VASP run.
+
+        on-top:    relaxed surface magmoms + [0.0] for the added O adsorbate.
+        lattice-O: relaxed surface magmoms minus the removed lattice-O atom entry.
+        Returns None if relaxed surface magmoms are not available.
         """
+        relaxed_surface_magmom = self._surface_study.get_relaxed_surface_magmom()
+        if relaxed_surface_magmom is None:
+            return None
         if self.site_type == 'on-top':
-            return list(slab_magmom) + [0.0]
+            return list(relaxed_surface_magmom) + [0.0]
         elif self.site_type == 'lattice O':
-            # The lattice-O atom (tag=3) is deleted from the slab for this calc.
             site_idx = self._get_site_atom_index(self.init_surface)
-            result = list(slab_magmom)
+            result = list(relaxed_surface_magmom)
             del result[site_idx]
             return result
         raise ValueError(f"Unsupported site type: {self.site_type}")
 
-    def get_OH_init_magmom(self, surface_magmom: list[float]) -> list[float]:
+    def get_OH_init_magmom(self) -> list[float] | None:
         """Initial MAGMOM list for the OH adsorption VASP run.
 
         on-top:    uses _relaxed_O_magmom (N+1: slab+O) + [0.0] for H = N+2.
-                   Raises RuntimeError if O-stage magmoms are absent.
-        lattice-O: _relaxed_O_magmom covers surface-without-O (N-1, wrong count).
-                   Always uses surface_magmom (N) + [0.0] for H = N+1.
-
-        Raises RuntimeError if surface_magmom is None.
+                   Returns None if O-stage magmoms are absent.
+        lattice-O: uses relaxed surface magmom (N) + [0.0] for H = N+1.
+                   Returns None if relaxed surface magmoms are absent.
         """
-        if surface_magmom is None:
-            raise RuntimeError(
-                "surface_magmom is required for OH magmom setup. "
-                "The surface must be relaxed and its magmoms available."
-            )
         if self.site_type == 'on-top':
             if self._relaxed_O_magmom is None:
-                raise RuntimeError(
-                    "get_OH_init_magmom called for on-top site before O-stage "
-                    "magmoms are available. set_relaxed_O_calc must be called "
-                    "with a calculator-attached structure first."
-                )
+                return None
             return list(self._relaxed_O_magmom) + [0.0]
         elif self.site_type == 'lattice O':
+            surface_magmom = self._surface_study.get_relaxed_surface_magmom()
+            if surface_magmom is None:
+                return None
             return list(surface_magmom) + [0.0]
         raise ValueError(f"Unsupported site type: {self.site_type}")
 
@@ -660,6 +665,8 @@ class OER_adsorption_site_study:
             self.accepted_relaxed_OH_pairs,
             key=lambda pair: pair[1],
         )
+        if best_atoms.calc is not None:
+            self._relaxed_OH_magmom = best_atoms.get_magnetic_moments().tolist()
         self.relaxed_OH_atoms = best_atoms.copy()
         self.energies_dict['OH_adsorbed_energy'] = best_energy
 

@@ -369,7 +369,8 @@ class OER_surface_study:
         self.relaxed_surface_add_sites_studies[index] = \
             OER_adsorption_site_study(atoms, pos, index,
                 self.surface_normal,
-                init = (site_type, self.relaxed_surface_energy))
+                init=(site_type, self.relaxed_surface_energy),
+                surface_study=self)
         
     def update_adsorption_energies(self):
         if self.add_sites_df_relaxed is None:

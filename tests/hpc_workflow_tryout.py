@@ -199,6 +199,16 @@ surf_id = EXPLOG.add_process(
     calculation_type="surface_relaxation",
     termination_index=TERM_IDX,
 )
+
+study = EXPLOG.relational_frame.candidates[CAND_ID].study_obj
+surface_study = study.get_surface_studies()[TERM_IDX]
+slab_magmom = surface_study.get_slab_magmom()
+n_surface = len(surface_study.get_non_relaxed_surface())
+check(slab_magmom is not None, "Slab magmom must be set before surface_relaxation")
+check(len(slab_magmom) == n_surface,
+      f"Slab magmom length must equal n_surface atoms ({n_surface})")
+print(f"{elapsed()}  [magmom] Slab magmom (first 5): {slab_magmom[:5]}", flush=True)
+
 EXPLOG.submit_process(process_id=surf_id)
 surf_statuses = wait_for_terminal([surf_id], EXPLOG, SLEEP_SEC, "surface")
 check(surf_statuses[surf_id] == "completed", "Surface relaxation must complete")
@@ -210,10 +220,15 @@ check(
     "Relaxed surface must be set after surface_relaxation completes",
 )
 
-# ── MAGMOM: surface study slab magmom ────────────────────────────────────────
-slab_magmom = surface_study.get_slab_magmom()
-check(slab_magmom is not None, "Slab magmom must be set after surface_relaxation")
-print(f"{elapsed()}  [magmom] Slab magmom: {slab_magmom}", flush=True)
+# ── MAGMOM: relaxed surface magmoms ──────────────────────────────────────────
+relaxed_surf_magmom = surface_study.get_relaxed_surface_magmom()
+n_relaxed = len(surface_study.get_relaxed_surface())
+check(relaxed_surf_magmom is not None,
+      "Relaxed surface magmoms must be available after surface_relaxation")
+check(len(relaxed_surf_magmom) == n_relaxed,
+      f"Relaxed surface magmom length must equal n_relaxed atoms ({n_relaxed})")
+print(f"{elapsed()}  [magmom] Relaxed surface magmom (first 5): "
+      f"{relaxed_surf_magmom[:5]}", flush=True)
 
 surface_study.determine_adsorption_sites(only_reduced_coord_O_sites=False)
 df = surface_study.get_adsorption_sites_df()
@@ -235,6 +250,17 @@ surface_study.initialize_adsorption_site_study(LATTICE_O_IDX)
 ad_studies      = surface_study.get_adsorption_site_studies_dict()
 on_top_study    = ad_studies[ON_TOP_IDX]
 lattice_o_study = ad_studies[LATTICE_O_IDX]
+
+# ── MAGMOM: O init magmoms before O adsorption ───────────────────────────────
+for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
+    o_init = ad_st.get_O_init_magmom()
+    n_O = len(ad_st.get_atoms_for_O_calc())
+    check(o_init is not None,
+          f"{site_label}: O init magmom must be available before O_adsorption")
+    check(len(o_init) == n_O,
+          f"{site_label}: O init magmom length must equal n_O atoms ({n_O})")
+    print(f"{elapsed()}  [magmom] {site_label} O init magmom (first 5): "
+          f"{o_init[:5]}", flush=True)
 
 # ── Stage 3: O adsorption — both sites in parallel ────────────────────────────
 print(f"\n{elapsed()}  ── Stage 3: O adsorption (on-top + lattice-O in parallel) ──",
@@ -268,11 +294,25 @@ check(
 
 # ── MAGMOM: relaxed O structures ─────────────────────────────────────────────
 for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
-    check(
-        ad_st._relaxed_O_magmom is not None,
-        f"{site_label}: _relaxed_O_magmom must be set after O_adsorption",
-    )
-    print(f"{elapsed()}  [magmom] {site_label} O magmom: {ad_st._relaxed_O_magmom}", flush=True)
+    o_calc = ad_st.get_O_calc_magmom()
+    n_O = len(ad_st.relaxed_O_atoms)
+    check(o_calc is not None,
+          f"{site_label}: O calc magmom must be set after O_adsorption")
+    check(len(o_calc) == n_O,
+          f"{site_label}: O calc magmom length must equal n_O atoms ({n_O})")
+    print(f"{elapsed()}  [magmom] {site_label} O calc magmom (first 5): "
+          f"{o_calc[:5]}", flush=True)
+
+# ── MAGMOM: OH init magmoms before OH adsorption ─────────────────────────────
+for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
+    oh_init = ad_st.get_OH_init_magmom()
+    n_OH = len(ad_st.OH_init_atoms[0])
+    check(oh_init is not None,
+          f"{site_label}: OH init magmom must be available before OH_adsorption")
+    check(len(oh_init) == n_OH,
+          f"{site_label}: OH init magmom length must equal n_OH atoms ({n_OH})")
+    print(f"{elapsed()}  [magmom] {site_label} OH init magmom (first 5): "
+          f"{oh_init[:5]}", flush=True)
 
 # ── Stage 4: OH adsorption — both sites in parallel (6 jobs) ─────────────────
 print(f"\n{elapsed()}  ── Stage 4: OH adsorption (on-top×3 + lattice-O×3 in parallel) ──",
@@ -308,16 +348,14 @@ for pid, s in oh_statuses.items():
 
 # ── MAGMOM: relaxed OH structures ────────────────────────────────────────────
 for site_label, ad_st in [("on-top", on_top_study), ("lattice-O", lattice_o_study)]:
-    oh_atoms = ad_st.relaxed_OH_atoms
-    check(oh_atoms is not None, f"{site_label}: relaxed_OH_atoms must be set")
-    oh_init_magmoms = oh_atoms.arrays.get("initial_magmoms")
-    check(
-        oh_init_magmoms is not None and len(oh_init_magmoms) == len(oh_atoms),
-        f"{site_label}: relaxed OH atoms must have 'initial_magmoms' array "
-        f"of length {len(oh_atoms)}",
-    )
-    print(f"{elapsed()}  [magmom] {site_label} OH initial magmoms (first 5): "
-          f"{oh_init_magmoms[:5]}", flush=True)
+    oh_calc = ad_st.get_OH_calc_magmom()
+    n_OH = len(ad_st.relaxed_OH_atoms)
+    check(oh_calc is not None,
+          f"{site_label}: OH calc magmom must be set after OH_adsorption")
+    check(len(oh_calc) == n_OH,
+          f"{site_label}: OH calc magmom length must equal n_OH atoms ({n_OH})")
+    print(f"{elapsed()}  [magmom] {site_label} OH calc magmom (first 5): "
+          f"{oh_calc[:5]}", flush=True)
 
 # ── Stage 5: Final metric checks ──────────────────────────────────────────────
 print(f"\n{elapsed()}  ── Stage 5: Final metric checks ──", flush=True)

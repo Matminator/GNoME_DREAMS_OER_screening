@@ -526,7 +526,7 @@ def _run_magnetic_bulk_pipeline(
     slab_n = len(slab_magmom)
 
     for site_idx, ad_study in ad_site_dict.items():
-        o_magmom = ad_study.get_O_init_magmom(slab_magmom)
+        o_magmom = ad_study.get_O_init_magmom()
         site_type = ad_study.site_type
 
         if site_type == 'on-top':
@@ -575,11 +575,11 @@ def _run_magnetic_bulk_pipeline(
         site_type = ad_study.site_type
 
         if site_type == 'on-top':
-            assert ad_study._relaxed_O_magmom is not None, (
-                f"Site {site_idx} on-top: _relaxed_O_magmom must be set after "
+            assert ad_study.get_O_calc_magmom() is not None, (
+                f"Site {site_idx} on-top: O calc magmom must be set after "
                 "O_adsorption completes in test mode"
             )
-            oh_magmom = ad_study.get_OH_init_magmom(slab_magmom)
+            oh_magmom = ad_study.get_OH_init_magmom()
             # on-top: _relaxed_O_magmom (slab_n + 1 entries) + [0.0] for H
             assert len(oh_magmom) == slab_n + 2, (
                 f"Site {site_idx} on-top: OH magmom length must be {slab_n + 2}, "
@@ -597,7 +597,7 @@ def _run_magnetic_bulk_pipeline(
                 )
 
         elif site_type == 'lattice O':
-            oh_magmom = ad_study.get_OH_init_magmom(slab_magmom)
+            oh_magmom = ad_study.get_OH_init_magmom()
             # lattice-O: slab_magmom (slab_n entries) + [0.0] for H
             assert len(oh_magmom) == slab_n + 1, (
                 f"Site {site_idx} lattice-O: OH magmom length must be {slab_n + 1}, "

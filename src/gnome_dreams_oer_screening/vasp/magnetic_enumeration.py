@@ -91,7 +91,19 @@ def enumerate_magnetic_structures(structure, n_max: int = 4
     candidates: list[dict] = []
 
     try:
-        enumerator = MagneticStructureEnumerator(structure, automatic=True)
+        enumerator = MagneticStructureEnumerator(
+            structure,
+            automatic=True,
+            max_orderings=n_max * 3,  # we keep n_max; 2x headroom for the supercell filter
+            transformation_kwargs={
+                # Pymatgen auto-computes max(1, int(4/num_mag_sites)) when
+                # max_cell_size is not set — a structure with 1 magnetic site
+                # gets max_cell_size=4 by default (4x supercells searched).
+                # We discard supercells below anyway, so setting 1 avoids
+                # that expensive enumlib search with no loss of useful output.
+                "max_cell_size": 1,
+            },
+        )
     except ValueError as e:
         if "Not detected as magnetic" in str(e):
             enumerator = None # non-magnetic elements -> FM fallback

@@ -124,11 +124,11 @@ class Explog:
             tmp.rename(dest)
 
     def add_candidate(self,
-                      candidate_id: str, 
+                      candidate_id: str,
                       study_obj: OER_catalyst_study,
-                      reason_or_hypothesis: str | None = None, 
+                      reason_or_hypothesis: str | None = None,
                       notes: str | None = None) -> None:
-        
+
         if candidate_id in \
             self.relational_frame.candidates.df['candidate_id'].values:
             raise ValueError(f"Candidate with id {candidate_id} " \
@@ -138,7 +138,7 @@ class Explog:
                              "reason_or_hypothesis": reason_or_hypothesis,
                              "notes": notes,
                              "study_obj": study_obj}
-        self.relational_frame.candidates.add_row(new_candidate_row, 
+        self.relational_frame.candidates.add_row(new_candidate_row,
                                                  allow_update=False)
 
     def can_add_process(

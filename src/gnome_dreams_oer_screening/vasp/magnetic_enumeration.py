@@ -1,7 +1,27 @@
 import warnings
 
 import spglib
-from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
+from pymatgen.analysis.magnetism.analyzer import DEFAULT_MAGMOMS, MagneticStructureEnumerator
+from pymatgen.core import Composition
+
+
+def count_magnetic_sites_from_formula(formula: str) -> int:
+    """Count total magnetic atoms in a formula string using pymatgen's DEFAULT_MAGMOMS.
+
+    Example: "V2Cu1Ni9O16" -> 12  (2V + 1Cu + 9Ni; O is not magnetic)
+    """
+    comp = Composition(formula)
+    return sum(int(comp[el]) for el in comp if el.symbol in DEFAULT_MAGMOMS)
+
+
+def count_magnetic_sites(structure) -> int:
+    """Count sites whose species_string is in pymatgen's DEFAULT_MAGMOMS.
+
+    Uses the same element list that MagneticStructureEnumerator uses internally,
+    so this count is consistent with what the enumerator would search over.
+    O, Te, and other non-transition-metal species are not counted.
+    """
+    return sum(1 for site in structure if site.species_string in DEFAULT_MAGMOMS)
 
 
 def _count_magnetic_symmetry_ops(mag_structure) -> int:

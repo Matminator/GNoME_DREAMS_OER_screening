@@ -24,12 +24,73 @@ from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
     extract_mag_config_index,
     _count_magnetic_symmetry_ops,
+    count_magnetic_sites,
+    count_magnetic_sites_from_formula,
 )
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Not all sites have property wyckoff:UserWarning",
     "ignore:Elements in POSCAR would be overwritten:UserWarning",
 )
+
+
+# ---------------------------------------------------------------------------
+# count_magnetic_sites_from_formula
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("formula, expected", [
+    ("Fe",        1),   # single magnetic element
+    ("Fe2O3",     2),   # O is not magnetic
+    ("V2Cu1Ni9O16", 12),  # 2V + 1Cu + 9Ni; matches the POSCAR test structure
+    ("Ag5Ir3O14", 0),   # Ir is NOT in DEFAULT_MAGMOMS; neither are Ag or O
+    ("NaCl",      0),   # no magnetic elements
+    ("TiO2",      0),   # Ti is not in DEFAULT_MAGMOMS; O is not either
+    ("MnFe2O4",   3),   # 1Mn + 2Fe; O not magnetic
+])
+@pytest.mark.mini
+def test_count_magnetic_sites_from_formula(formula, expected):
+    assert count_magnetic_sites_from_formula(formula) == expected
+
+
+@pytest.mark.mini
+def test_count_magnetic_sites_from_formula_empty_formula_raises():
+    """Composition("") raises in pymatgen — guard that we don't silently return 0."""
+    with pytest.raises(Exception):
+        count_magnetic_sites_from_formula("")
+
+
+# ---------------------------------------------------------------------------
+# count_magnetic_sites (Structure-based)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_count_magnetic_sites_structure():
+    """count_magnetic_sites on a simple Fe-O structure."""
+    from pymatgen.core import Lattice, Structure
+    lattice = Lattice.cubic(4.0)
+    structure = Structure(lattice, ["Fe", "Fe", "O"], [
+        [0, 0, 0], [0.5, 0.5, 0.5], [0.25, 0.25, 0.25]
+    ])
+    assert count_magnetic_sites(structure) == 2  # 2 Fe; O not magnetic
+
+
+@pytest.mark.mini
+def test_count_magnetic_sites_non_magnetic_structure():
+    from pymatgen.core import Lattice, Structure
+    lattice = Lattice.cubic(4.0)
+    structure = Structure(lattice, ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    assert count_magnetic_sites(structure) == 0
+
+
+@pytest.mark.mini
+def test_count_magnetic_sites_consistent_with_formula_counter():
+    """Structure-based and formula-based counters must agree for the same composition."""
+    from pymatgen.core import Lattice, Structure
+    lattice = Lattice.cubic(4.0)
+    structure = Structure(lattice, ["Ni", "V", "O", "O"], [
+        [0, 0, 0], [0.5, 0.5, 0.5], [0.25, 0.25, 0.25], [0.75, 0.75, 0.75]
+    ])
+    assert count_magnetic_sites(structure) == count_magnetic_sites_from_formula("NiVO2")
 
 
 def _enumlib_available() -> bool:

@@ -1,35 +1,52 @@
 """
 Benchmark: max_cell_size=1 vs pymatgen default for MagneticStructureEnumerator.
 
-Compares wall-clock time for structures where pymatgen's auto-scaling
-sets max_cell_size > 1 (structures with few magnetic sites).
+Always runs:
+  - Fe BCC primitive  (1 atom)   : default AND new (max_cell_size=1)
+  - Fe BCC conventional (2 atoms): default AND new (max_cell_size=1)
+  - VNiTeO6 (18 atoms)           : new only (fast)
 
-Run on HPC where enumlib is available:
+Optional (WARNING — may take 30+ minutes):
+  - VNiTeO6 through pymatgen default: enabled with --also-time-vniteo6-default
+
+Usage
+-----
     python tests/benchmark_magnetic_enumeration.py
+    python tests/benchmark_magnetic_enumeration.py --also-time-vniteo6-default
+
+Requires enumlib binaries (enum.x, makestr.x) on PATH.
 """
 
+import argparse
+import pathlib
 import time
+
+from pymatgen.analysis.magnetism.analyzer import (
+    CollinearMagneticStructureAnalyzer,
+    MagneticStructureEnumerator,
+)
 from pymatgen.core import Lattice, Structure
-from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
 
 from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
 )
 
-
-def _make_structure(formula: str, n_atoms: int) -> Structure:
-    """Build a simple BCC-like Fe structure with n_atoms in the cell."""
-    a = 2.87
-    if n_atoms == 1:
-        lat = Lattice([[a/2, a/2, -a/2], [-a/2, a/2, a/2], [a/2, -a/2, a/2]])
-        return Structure(lat, ["Fe"], [[0, 0, 0]])
-    if n_atoms == 2:
-        return Structure(Lattice.cubic(a), ["Fe", "Fe"], [[0,0,0],[0.5,0.5,0.5]])
-    raise ValueError(n_atoms)
+TESTS_DIR = pathlib.Path(__file__).parent
 
 
-def _time_enumerator(structure, max_cell_size, label: str) -> float:
-    """Time MagneticStructureEnumerator directly with a given max_cell_size."""
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _auto_max_cell_size(structure: Structure) -> int:
+    """Reproduce pymatgen's auto-scaling: max(1, int(4 / n_mag_sites))."""
+    analyzer = CollinearMagneticStructureAnalyzer(structure, make_primitive=False)
+    mag_species = set(analyzer.types_of_magnetic_specie)
+    n_mag = sum(1 for site in structure if site.specie in mag_species)
+    return max(1, int(4 / n_mag)) if n_mag > 0 else 1
+
+
+def _time_enumerator(structure: Structure, max_cell_size, label: str) -> float:
     kwargs = {"max_cell_size": max_cell_size} if max_cell_size is not None else {}
     t0 = time.perf_counter()
     try:
@@ -41,50 +58,106 @@ def _time_enumerator(structure, max_cell_size, label: str) -> float:
     except ValueError:
         pass
     elapsed = time.perf_counter() - t0
-    print(f"  {label:45s}  {elapsed:.2f} s")
+    print(f"  {label:55s}  {elapsed:7.2f} s")
     return elapsed
 
 
-def _time_enumerate_magnetic_structures(structure, label: str) -> float:
-    """Time the full enumerate_magnetic_structures (uses max_cell_size=1)."""
+def _time_wrapper(structure: Structure) -> float:
     t0 = time.perf_counter()
     results = enumerate_magnetic_structures(structure, n_max=4)
     elapsed = time.perf_counter() - t0
-    print(f"  {label:45s}  {elapsed:.2f} s  ({len(results)} configs returned)")
+    print(f"  {'enumerate_magnetic_structures() [our wrapper]':55s}  {elapsed:7.2f} s"
+          f"  ({len(results)} configs returned)")
     return elapsed
 
 
-def _auto_max_cell_size(structure) -> int:
-    """Reproduce pymatgen's auto-scaling formula to show what the default would be."""
-    from pymatgen.analysis.magnetism.analyzer import CollinearMagneticStructureAnalyzer
-    analyzer = CollinearMagneticStructureAnalyzer(structure, make_primitive=False)
-    mag_species = [sp for sp in analyzer.types_of_magnetic_specie]
-    n_mag = sum(1 for site in structure if site.specie in mag_species)
-    return max(1, int(4 / n_mag)) if n_mag > 0 else 1
+def _run_structure(name: str, structure: Structure,
+                   run_default: bool, run_new: bool) -> None:
+    auto = _auto_max_cell_size(structure)
+    print(f"\nStructure: {name}")
+    print(f"  pymatgen default max_cell_size = {auto}")
+    print("-" * 72)
+
+    t_default = None
+    if run_default:
+        t_default = _time_enumerator(
+            structure, max_cell_size=None,
+            label=f"pymatgen default (max_cell_size={auto})")
+
+    t_new = None
+    if run_new:
+        t_new = _time_enumerator(
+            structure, max_cell_size=1,
+            label="new: max_cell_size=1 (via MagneticStructureEnumerator)")
+        _time_wrapper(structure)
+
+    if t_default is not None and t_new is not None and t_new > 0:
+        print(f"  Speedup (default → new): {t_default / t_new:.1f}x")
 
 
-structures = {
-    "Fe BCC primitive (1 atom)":   _make_structure("Fe", 1),
-    "Fe BCC conventional (2 atoms)": _make_structure("Fe", 2),
-}
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
-print("=" * 70)
-print("Magnetic enumeration benchmark")
-print("Compares default max_cell_size vs explicit max_cell_size=1")
-print("=" * 70)
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Benchmark magnetic structure enumeration speed.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "By default the benchmark is safe to run.\n"
+            "Add --also-time-vniteo6-default to measure the slow pymatgen\n"
+            "default on VNiTeO6 — WARNING: this may take 30+ minutes."
+        ),
+    )
+    parser.add_argument(
+        "--also-time-vniteo6-default",
+        action="store_true",
+        help=(
+            "WARNING: also run VNiTeO6 through pymatgen's default enumeration. "
+            "This is the known slow path and may take 30+ minutes. "
+            "Only use this if you want to measure how bad the hang was."
+        ),
+    )
+    args = parser.parse_args()
 
-for name, struct in structures.items():
-    auto = _auto_max_cell_size(struct)
-    print(f"\nStructure: {name}  (pymatgen default max_cell_size={auto})")
-    print("-" * 70)
-    t_default = _time_enumerator(struct, max_cell_size=None,
-                                 label=f"default (max_cell_size={auto})")
-    t_new     = _time_enumerator(struct, max_cell_size=1,
-                                 label="max_cell_size=1")
-    t_wrapper = _time_enumerate_magnetic_structures(struct,
-                                 label="enumerate_magnetic_structures()")
+    print("=" * 72)
+    print("Magnetic enumeration benchmark")
+    print("=" * 72)
 
-    if t_default > 0:
-        print(f"  Speedup (default → max_cell_size=1): {t_default / t_new:.1f}x")
+    # Fe structures: always run both methods
+    _run_structure(
+        "Fe BCC primitive  (1 atom)",
+        Structure(
+            Lattice([[2.87/2, 2.87/2, -2.87/2],
+                     [-2.87/2, 2.87/2, 2.87/2],
+                     [2.87/2, -2.87/2, 2.87/2]]),
+            ["Fe"], [[0, 0, 0]],
+        ),
+        run_default=True,
+        run_new=True,
+    )
 
-print("\nDone.")
+    _run_structure(
+        "Fe BCC conventional (2 atoms)",
+        Structure(Lattice.cubic(2.87), ["Fe", "Fe"],
+                  [[0, 0, 0], [0.5, 0.5, 0.5]]),
+        run_default=True,
+        run_new=True,
+    )
+
+    # VNiTeO6: new method always, default only if explicitly requested
+    if args.also_time_vniteo6_default:
+        print("\n*** --also-time-vniteo6-default is ON — this may take 30+ min ***")
+
+    _run_structure(
+        "VNiTeO6  (18 atoms, V+Ni magnetic)",
+        Structure.from_file(TESTS_DIR / "POSCAR_VniTeO6"),
+        run_default=args.also_time_vniteo6_default,
+        run_new=True,
+    )
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()

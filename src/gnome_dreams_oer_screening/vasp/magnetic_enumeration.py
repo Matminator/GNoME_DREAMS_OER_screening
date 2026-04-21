@@ -1,18 +1,7 @@
-import multiprocessing
-import os
-import queue
-import signal
 import warnings
 
 import spglib
 from pymatgen.analysis.magnetism.analyzer import MagneticStructureEnumerator
-from pymatgen.core import Structure
-
-# Hard wall-clock timeout for the entire MagneticStructureEnumerator call.
-# The built-in enumlib subprocess timeout (pymatgen default: 5 s) does not
-# reliably kill spawned child processes on HPC systems, causing 30-min hangs.
-# This process-level timeout sends SIGTERM to the worker and everything it spawned.
-ENUMERATOR_TIMEOUT_SECONDS = 300
 
 
 def _count_magnetic_symmetry_ops(mag_structure) -> int:
@@ -63,38 +52,6 @@ def _count_magnetic_symmetry_ops(mag_structure) -> int:
         return 1
 
 
-def _enumerator_worker(
-    structure: Structure,
-    n_max: int,
-    result_queue: multiprocessing.Queue,
-) -> None:
-    """Worker run in a child process. Returns (Structure, origin) pairs via queue.
-
-    Calls os.setsid() on Linux to create a new process group, so that
-    _kill_worker() can kill enumlib's child processes along with this worker.
-    """
-    if hasattr(os, "setsid"):
-        os.setsid()  # Linux/Mac: new process group so killpg reaches enumlib children
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", "Specified max cell size.*smaller than the minimum"
-            )
-            enumerator = MagneticStructureEnumerator(
-                structure,
-                automatic=True,
-                max_orderings=n_max * 3,
-                transformation_kwargs={"max_cell_size": 1},
-            )
-        pairs = list(zip(enumerator.ordered_structures,
-                         enumerator.ordered_structure_origins))
-        result_queue.put(("ok", pairs))
-    except ValueError as e:
-        result_queue.put(("valueerror", str(e)))
-    except Exception as e:
-        result_queue.put(("error", str(e)))
-
-
 def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     """
     Enumerate distinct collinear magnetic orderings for a structure and
@@ -124,7 +81,7 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
       may appear at index 0.
     - The first n_max candidates are returned.
     - If enumeration yields nothing (non-magnetic material, enumlib
-      unavailable, or timeout), a single FM fallback entry is returned so
+      unavailable), a single non-magnetic fallback entry is returned so
       the pipeline always has at least one bulk job to submit.
 
     Note: MagneticStructureEnumerator.ordered_structures is NOT guaranteed
@@ -134,78 +91,62 @@ def enumerate_magnetic_structures(structure, n_max: int = 4) -> list[dict]:
     n_input = len(structure)
     candidates: list[dict] = []
 
-    result_queue: multiprocessing.Queue = multiprocessing.Queue()
-    proc = multiprocessing.Process(
-        target=_enumerator_worker,
-        args=(structure, n_max, result_queue),
-    )
-    proc.start()
-    proc.join(timeout=ENUMERATOR_TIMEOUT_SECONDS)
-
-    if proc.is_alive():
-        # On Linux/Mac: kill the entire process group (worker + enumlib children).
-        # On Windows: fall back to terminate() which kills the worker only.
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except (AttributeError, ProcessLookupError):
-            proc.terminate()
-        proc.join()
-        warnings.warn(
-            f"MagneticStructureEnumerator timed out after "
-            f"{ENUMERATOR_TIMEOUT_SECONDS} s for {structure.formula}. "
-            "Falling back to FM ordering.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        pairs = []
-    else:
-        try:
-            status, payload = result_queue.get_nowait()
-        except queue.Empty:
-            pairs = []
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Specified max cell size.*smaller than the minimum"
+            )
+            enumerator = MagneticStructureEnumerator(
+                structure,
+                automatic=True,
+                max_orderings=n_max * 3,  # 3x headroom for the supercell filter
+                transformation_kwargs={
+                    # Pymatgen auto-computes max(1, int(4/num_mag_sites)) when
+                    # max_cell_size is not set — a structure with 1 magnetic site
+                    # gets max_cell_size=4 by default (4x supercells searched).
+                    # We discard supercells below anyway, so setting 1 avoids
+                    # that expensive enumlib search with no loss of useful output.
+                    "max_cell_size": 1,
+                },
+            )
+    except ValueError as e:
+        if "Not detected as magnetic" in str(e):
+            enumerator = None  # non-magnetic elements -> NM fallback
         else:
-            if status == "ok":
-                pairs = payload
-            elif status == "valueerror":
-                if "Not detected as magnetic" in payload:
-                    pairs = []
-                else:
-                    raise ValueError(payload)
-            else:
-                raise RuntimeError(f"Enumerator worker failed: {payload}")
+            raise e
 
-    for mag_struct, origin in pairs:
-        if len(mag_struct) > n_input:
-            continue  # discard supercell orderings
-        # MagneticStructureEnumerator stores spin in site.specie.spin, not
-        # in site.properties["magmom"]. Write it back into site properties
-        # so that (a) _count_magnetic_symmetry_ops reads the correct values
-        # and (b) VaspInputSet generates the MAGMOM INCAR tag automatically.
-        magmoms = [
-            float(site.specie.spin) if site.specie.spin is not None else 0.0
-            for site in mag_struct.sites
-        ]
-        for site, m in zip(mag_struct.sites, magmoms):
-            site.properties["magmom"] = m
-        candidates.append({
-            "structure": mag_struct,
-            "magmom": magmoms,
-            "ordering": str(origin),
-        })
+    if enumerator is not None:
+        for mag_struct, origin in zip(
+            enumerator.ordered_structures,
+            enumerator.ordered_structure_origins
+        ):
+            if len(mag_struct) > n_input:
+                continue  # discard supercell orderings
+            # MagneticStructureEnumerator stores spin in site.specie.spin, not
+            # in site.properties["magmom"]. Write it back into site properties
+            # so that (a) _count_magnetic_symmetry_ops reads the correct values
+            # and (b) VaspInputSet generates the MAGMOM INCAR tag automatically.
+            magmoms = [
+                float(site.specie.spin) if site.specie.spin is not None else 0.0
+                for site in mag_struct.sites
+            ]
+            for site, m in zip(mag_struct.sites, magmoms):
+                site.properties["magmom"] = m
+            candidates.append({
+                "structure": mag_struct,
+                "magmom": magmoms,
+                "ordering": str(origin),
+            })
 
     if not candidates:
-        # Non-magnetic material, timeout, or enumlib yielded nothing —
-        # return a copy with magmoms set as site properties so the structure
-        # is self-consistent and VaspInputSet writes the correct MAGMOM tag.
+        # Non-magnetic material — return a copy with magmoms set as site
+        # properties so the structure is self-consistent with the magmom list
+        # and VaspInputSet writes the correct MAGMOM tag.
         nm_magmom = [0.6] * n_input
         nm_struct = structure.copy()
         for site, m in zip(nm_struct.sites, nm_magmom):
             site.properties["magmom"] = m
-        return [{
-            "structure": nm_struct,
-            "magmom": nm_magmom,
-            "ordering": "NM",
-        }]
+        return [{"structure": nm_struct, "magmom": nm_magmom, "ordering": "NM"}]
 
     # Sort descending by symmetry operation count (spin as site coloring).
     # FM is typically first (highest symmetry), but an AFM ordering with an

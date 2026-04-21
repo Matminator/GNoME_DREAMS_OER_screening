@@ -46,6 +46,7 @@ filterwarnings = [
     "ignore:ISMEAR = 0 with a small SIGMA:UserWarning:pymatgen.*",
     "ignore:ISMEAR = 0 with a small SIGMA:pymatgen.io.vasp.sets.BadInputSetWarning",
     "ignore:cannot collect test class 'TestRelaxSet':pytest.PytestCollectionWarning",
+    "ignore:Specified max cell size.*smaller than the minimum enumerable cell size:UserWarning:pymatgen.*",
 ]
 
 markers = [

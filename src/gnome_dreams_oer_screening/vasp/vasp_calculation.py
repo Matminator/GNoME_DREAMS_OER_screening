@@ -214,38 +214,51 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
     result.append(_step_to_atoms(vr.ionic_steps[-1], vr.final_energy, final_magmoms))
     return result
 
+# Minimal set of files retained after a completed VASP run.
+# Everything else is deleted to keep inode counts manageable at production scale.
+_VASP_KEEP_FILES = {
+    "INCAR",        # settings used
+    "KPOINTS",      # k-point mesh
+    "POSCAR",       # input structure
+    "CONTCAR",      # final relaxed structure
+    "OSZICAR",      # convergence summary
+    "vasprun.xml",  # machine-readable output
+    "OUTCAR",       # full log; kept for post-hoc debugging
+}
+
+
 def clean_up_vasp_directory(
-    directory: str, files_to_remove: list[str] = None,
-    purge_all_files: bool = False
-    ) -> None:
-    
-    dir_path =  Path(directory)
+    directory: str,
+    files_to_remove: list[str] = None,
+    purge_all_files: bool = False,
+) -> None:
+
+    dir_path = Path(directory)
 
     if not dir_path.exists():
         raise FileNotFoundError(f"Directory not found: {directory}")
-
     if not dir_path.is_dir():
         raise NotADirectoryError(f"Not a directory: {directory}")
 
     if purge_all_files:
-        targets = list(dir_path.iterdir())
-    else:
-        if files_to_remove is None:
-            files_to_remove = [
-                "POTCAR", "WAVECAR", "CHGCAR", "DOSCAR", "PROCAR", 
-                'DOSCAR', 'CHG', 'POTCAR.orig', 'OUTCAR'
-                ]
-        # Collect all files that match any of the specified substrings
+        targets = [f for f in dir_path.iterdir() if f.is_file()]
+    elif files_to_remove is not None:
+        # Explicit remove-list: delete files whose names contain any token.
         targets = [
-            file for file in dir_path.iterdir()
-            if any(token in file.name for token in files_to_remove)
+            f for f in dir_path.iterdir()
+            if f.is_file() and any(token in f.name for token in files_to_remove)
+        ]
+    else:
+        # Default keep-list mode: delete everything not in _VASP_KEEP_FILES.
+        targets = [
+            f for f in dir_path.iterdir()
+            if f.is_file() and f.name not in _VASP_KEEP_FILES
         ]
 
-    for file in targets:
+    for f in targets:
         try:
-            if file.is_file():
-                file.unlink()
-        except Exception as e:
+            f.unlink()
+        except Exception:
             pass
 
 

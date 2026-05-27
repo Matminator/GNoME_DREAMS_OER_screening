@@ -178,6 +178,7 @@ def get_RPBE_surface_settings():
         "NELMIN": 8,
         "NELM": 100,
         "NSW": 300,
+        "POTIM": 0.3,
         "PREC": "Accurate",
         "SIGMA": 0.1,
     },

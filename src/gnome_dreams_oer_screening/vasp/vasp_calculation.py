@@ -108,8 +108,9 @@ def run_surface_vasp_two_stage(
     NELMDL=-12, AMIX=0.2 for cold-start stability.
 
     Stage 2 — Full ionic relaxation with LDIPOL=True, IDIPOL=3, DIPOL set to
-    the structure centre of mass.
-      - If Stage 1 converged: warm restart (ISTART=1), original ALGO, default AMIX.
+    the structure centre of mass. Always built from the original pre-Stage-1
+    INCAR so no Custodian corrections from Stage 1 carry over.
+      - If Stage 1 converged: warm restart (ISTART=1), original ALGO.
       - If Stage 1 failed:    cold start (ISTART=0), ALGO=Normal, NELMDL=-12,
                               AMIX=0.2 enforced throughout.
 
@@ -127,6 +128,7 @@ def run_surface_vasp_two_stage(
 
     # --- Stage 1: cold-start SCF pre-convergence without dipole correction ---
     incar = VaspIncar.from_file(directory / "INCAR")
+    orig_incar  = dict(incar)            # clean snapshot — Stage 2 base
     orig_nsw    = incar.get("NSW",    100)
     orig_ibrion = incar.get("IBRION", 2)
     orig_algo   = incar.get("ALGO",   "Fast")
@@ -153,11 +155,13 @@ def run_surface_vasp_two_stage(
         stage1_converged = False
 
     # --- Stage 2: full ionic relaxation with dipole correction ---
+    # Start from the clean original INCAR — Stage 1 Custodian corrections are
+    # private to Stage 1 and must not carry over to Stage 2.
     struct = Structure.from_file(directory / "POSCAR")
     weights = [site.species.weight for site in struct]
     dipol = np.average(struct.frac_coords, weights=weights, axis=0).tolist()
 
-    incar = VaspIncar.from_file(directory / "INCAR")
+    incar = VaspIncar(orig_incar)
     incar["NSW"]    = orig_nsw
     incar["IBRION"] = orig_ibrion
     incar["LDIPOL"] = True
@@ -168,17 +172,11 @@ def run_surface_vasp_two_stage(
     if stage1_converged:
         incar["ISTART"] = 1        # warm restart from Stage 1 WAVECAR
         incar["ALGO"]   = orig_algo
-        incar.pop("NELMDL", None)  # not needed for warm restart
-        incar.pop("AMIX",   None)  # revert to default AMIX=0.4
     else:
         incar["ISTART"] = 0        # cold start — Stage 1 WAVECAR unreliable
         incar["ALGO"]   = "Normal"
         incar["NELMDL"] = -12      # delay mixing onset
         incar["AMIX"]   = 0.2      # conservative mixing enforced throughout
-        # Remove Custodian last-resort mixing settings — these assume a warm
-        # restart and are dangerous on a cold start.
-        for key in ["BMIX", "BMIX_MAG", "AMIX_MAG", "IMIX", "ISEARCH"]:
-            incar.pop(key, None)
 
     incar.write_file(directory / "INCAR")
 

@@ -7,7 +7,7 @@ from typing import Literal
 
 from ase import Atoms
 from ase.calculators.singlepoint import SinglePointCalculator
-from ase.io import Trajectory
+from ase.io import Trajectory, read as ase_read
 from pymatgen.core.surface import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.vasp import Vasprun, Outcar, Incar as VaspIncar
@@ -206,9 +206,16 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
 
     Returns:
     list[Atoms]: ASE Atoms objects with a SinglePointCalculator carrying
-    energy and magnetic moments.
+    energy and magnetic moments. Fixed-atom constraints (FixAtoms) are
+    restored from the POSCAR selective dynamics.
     """
     directory = Path(directory)
+
+    # Restore fixed-atom constraints from POSCAR selective dynamics.
+    # vasprun.xml carries no constraint information; the POSCAR (always
+    # retained in _VASP_KEEP_FILES) is the authoritative source.
+    poscar_atoms = ase_read(directory / "POSCAR", format="vasp")
+    constraints = poscar_atoms.constraints   # [] when no selective dynamics
 
     vr = Vasprun(directory / "vasprun.xml")
     if not vr.converged_ionic:
@@ -229,6 +236,7 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
 
     def _step_to_atoms(step, energy, magmoms):
         atoms = AseAtomsAdaptor.get_atoms(step["structure"])
+        atoms.set_constraint(constraints)  # restore FixAtoms from POSCAR
         atoms.calc = SinglePointCalculator(atoms, energy=energy, magmoms=magmoms)
         return atoms
 

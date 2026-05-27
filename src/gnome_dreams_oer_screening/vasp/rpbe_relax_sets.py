@@ -34,6 +34,7 @@ def get_RPBE_bulk_settings():
         "LREAL": "AUTO",
         "LWAVE": False,
         "NELM": 100,
+        "NELMDL": -12,
         "NSW": 99,
         "PREC": "Accurate",
         "SIGMA": 0.1,

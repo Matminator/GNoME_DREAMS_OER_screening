@@ -104,18 +104,14 @@ def run_surface_vasp_two_stage(
         ):
     """Two-stage surface VASP: SCF pre-convergence, then full ionic relaxation with dipole correction.
 
-    Stage 1 — SCF only (NSW=0, no ionic steps), no dipole correction.
-    Stabilises the wavefunction before introducing the dipole sawtooth
-    potential, which can otherwise slow or destabilise SCF convergence
-    (VASP recommendation; see vasp.at/tutorials/latest/surface/part2).
+    Stage 1 — Cold-start SCF only (NSW=0), no dipole correction. ALGO=Normal,
+    NELMDL=-12, AMIX=0.2 for cold-start stability.
 
-    Stage 2 — Full ionic relaxation with LDIPOL=True, IDIPOL=3, DIPOL set
-    to the structure centre of mass. Forces are dipole-corrected throughout
-    the relaxation, giving physically correct geometry and energy
-    (consistent with pymatgen MVLSlabSet auto_dipole=True).
-
-    Both stages run in the same Slurm job. Stage 2 restarts from the Stage 1
-    WAVECAR (ISTART=1), so the extra SCF cost of Stage 1 is small.
+    Stage 2 — Full ionic relaxation with LDIPOL=True, IDIPOL=3, DIPOL set to
+    the structure centre of mass.
+      - If Stage 1 converged: warm restart (ISTART=1), original ALGO, default AMIX.
+      - If Stage 1 failed:    cold start (ISTART=0), ALGO=Normal, NELMDL=-12,
+                              AMIX=0.2 enforced throughout.
 
     If use_dipole_correction=False the function falls back to a single
     uncorrected ionic relaxation (equivalent to run_vasp_via_custodian).
@@ -129,15 +125,32 @@ def run_surface_vasp_two_stage(
         run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
         return
 
-    # --- Stage 1: SCF pre-convergence without dipole correction ---
+    # --- Stage 1: cold-start SCF pre-convergence without dipole correction ---
     incar = VaspIncar.from_file(directory / "INCAR")
     orig_nsw    = incar.get("NSW",    100)
     orig_ibrion = incar.get("IBRION", 2)
-    incar["NSW"]    = 0   # no ionic steps
-    incar["IBRION"] = -1  # static
+    orig_algo   = incar.get("ALGO",   "Fast")
+    incar["NSW"]    = 0        # no ionic steps
+    incar["IBRION"] = -1       # static
+    incar["NELMDL"] = -12      # delay mixing onset for cold-start stability
+    incar["ALGO"]   = "Normal" # blocked Davidson; more stable than RMM-DIIS on cold start
+    incar["AMIX"]   = 0.2      # conservative mixing for cold start
     incar.write_file(directory / "INCAR")
 
-    run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
+    # Stage 1 gets fewer retries: the ALGO ladder has ~2 unique strategies,
+    # so 5 errors is enough. Beyond that Custodian just cycles with bad settings.
+    try:
+        run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar,
+                               max_errors=5)
+    except Exception:
+        pass  # Stage 2 convergence check determines the path
+
+    # Determine Stage 2 strategy based on Stage 1 outcome
+    try:
+        vr = Vasprun(directory / "vasprun.xml")
+        stage1_converged = vr.converged_electronic
+    except Exception:
+        stage1_converged = False
 
     # --- Stage 2: full ionic relaxation with dipole correction ---
     struct = Structure.from_file(directory / "POSCAR")
@@ -147,11 +160,26 @@ def run_surface_vasp_two_stage(
     incar = VaspIncar.from_file(directory / "INCAR")
     incar["NSW"]    = orig_nsw
     incar["IBRION"] = orig_ibrion
-    incar["ISTART"] = 1      # restart from Stage 1 WAVECAR
     incar["LDIPOL"] = True
     incar["IDIPOL"] = 3
     incar["DIPOL"]  = dipol
-    incar["AMIN"]   = 0.01   # dampen charge oscillations with LDIPOL active
+    incar["AMIN"]   = 0.01     # dampen charge oscillations with LDIPOL active
+
+    if stage1_converged:
+        incar["ISTART"] = 1        # warm restart from Stage 1 WAVECAR
+        incar["ALGO"]   = orig_algo
+        incar.pop("NELMDL", None)  # not needed for warm restart
+        incar.pop("AMIX",   None)  # revert to default AMIX=0.4
+    else:
+        incar["ISTART"] = 0        # cold start — Stage 1 WAVECAR unreliable
+        incar["ALGO"]   = "Normal"
+        incar["NELMDL"] = -12      # delay mixing onset
+        incar["AMIX"]   = 0.2      # conservative mixing enforced throughout
+        # Remove Custodian last-resort mixing settings — these assume a warm
+        # restart and are dangerous on a cold start.
+        for key in ["BMIX", "BMIX_MAG", "AMIX_MAG", "IMIX", "ISEARCH"]:
+            incar.pop(key, None)
+
     incar.write_file(directory / "INCAR")
 
     run_vasp_via_custodian(directory, handlers, vasp_cmd, auto_npar, max_errors)
@@ -190,6 +218,11 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
             f"VASP ionic relaxation not converged in {directory}. "
             "Check if wall time was exceeded."
         )
+    if not vr.converged_electronic:
+        raise RuntimeError(
+            f"VASP electronic SCF not converged in {directory}. "
+            f"NELM={vr.incar.get('NELM', 60)} was reached without satisfying EDIFF."
+        )
 
     outcar = Outcar(directory / "OUTCAR")
     # outcar.magnetization: tuple[dict[str, float]], one dict per atom,
@@ -217,13 +250,15 @@ def read_vasp_results(directory, return_only_final=True) -> list[Atoms]:
 # Minimal set of files retained after a completed VASP run.
 # Everything else is deleted to keep inode counts manageable at production scale.
 _VASP_KEEP_FILES = {
-    "INCAR",        # settings used
-    "KPOINTS",      # k-point mesh
-    "POSCAR",       # input structure
-    "CONTCAR",      # final relaxed structure
-    "OSZICAR",      # convergence summary
-    "vasprun.xml",  # machine-readable output
-    "OUTCAR",       # full log; kept for post-hoc debugging
+    "INCAR",           # settings used
+    "KPOINTS",         # k-point mesh
+    "POSCAR",          # input structure
+    "CONTCAR",         # final relaxed structure
+    "OSZICAR",         # convergence summary
+    "vasprun.xml",     # machine-readable output
+    "OUTCAR",          # full log; kept for post-hoc debugging
+    "vasp.out",        # stdout; kept for post-hoc debugging
+    "custodian.json",  # Custodian error/correction log; needed to diagnose convergence failures
 }
 
 

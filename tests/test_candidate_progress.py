@@ -327,3 +327,76 @@ def test_failed_state_latches(tmp_path, tio2_rutile_atoms):
     _set_status(explog, pid, "completed")
     explog.update_log()
     assert _val(explog, cid, "state") == "failed"
+
+
+# ---------------------------------------------------------------------------
+# In-flight semantics, non-bulk unrecoverable, and edge cases
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_in_flight_counts_for_multi_job_stages(tmp_path, tio2_rutile_atoms):
+    """For the per-row stages (surface, O), started > finalized while jobs are
+    still running, i.e. in-flight = started - finalized."""
+    explog = Explog()
+    explog.init(tmp_path, mode="test")
+    cid = "c"
+    explog.add_candidate(candidate_id=cid, study_obj=_new_study(tio2_rutile_atoms),
+                         reason_or_hypothesis="in flight")
+
+    _inject_process(explog, cid, "bulk_relaxation", "completed")
+    # Two surface relaxations: one done, one still running.
+    _inject_process(explog, cid, "surface_relaxation", "completed",
+                    termination_index=0)
+    _inject_process(explog, cid, "surface_relaxation", "running",
+                    termination_index=1)
+    explog.update_log()
+    assert _val(explog, cid, "n_surface_started") == 2
+    assert _val(explog, cid, "n_surface_finalized") == 1     # one still in flight
+
+    # One surface completed -> O is eligible. Two O jobs: one done, one running.
+    _inject_process(explog, cid, "O_adsorption", "completed",
+                    termination_index=0, site_index=0)
+    _inject_process(explog, cid, "O_adsorption", "running",
+                    termination_index=0, site_index=1)
+    explog.update_log()
+    assert _val(explog, cid, "n_O_started") == 2
+    assert _val(explog, cid, "n_O_finalized") == 1
+    assert _val(explog, cid, "state") == "active"
+
+
+@pytest.mark.mini
+def test_unrecoverable_surface_finalized_but_keeps_active(tmp_path, tio2_rutile_atoms):
+    """A non-bulk 'unrecoverable: <reason>' row (e.g. a dissociated surface) is
+    terminal -> counts as finalized, does NOT fail the candidate, and does not
+    open the next stage (it produced no usable result)."""
+    explog = Explog()
+    explog.init(tmp_path, mode="test")
+    cid = "c"
+    explog.add_candidate(candidate_id=cid, study_obj=_new_study(tio2_rutile_atoms),
+                         reason_or_hypothesis="dissociated surface")
+
+    _inject_process(explog, cid, "bulk_relaxation", "completed")
+    _inject_process(
+        explog, cid, "surface_relaxation",
+        "unrecoverable: Relaxed surface dissociated and this surface can "
+        "therefore not be used for adsorption studies.",
+        termination_index=0,
+    )
+    explog.update_log()
+    assert _val(explog, cid, "state") == "active"          # surface-level, not candidate-level
+    assert _val(explog, cid, "n_surface_started") == 1
+    assert _val(explog, cid, "n_surface_finalized") == 1   # 'unrecoverable' is terminal
+    assert pd.isna(_val(explog, cid, "n_O_started"))       # no usable surface -> O gated
+
+
+@pytest.mark.mini
+def test_recompute_on_empty_frame_does_not_raise(tmp_path):
+    """update_log() (which runs the recompute) must be a no-op crash-free pass
+    when there are no candidates and no processes."""
+    explog = Explog()
+    explog.init(tmp_path, mode="test")
+    explog.update_log()  # must not raise on empty groupby / map
+    assert len(explog.relational_frame.candidates.df) == 0
+    # the new columns exist on the (empty) schema
+    for col in ("state", "n_bulk_started", "n_OH_finalized"):
+        assert col in explog.relational_frame.candidates.df.columns

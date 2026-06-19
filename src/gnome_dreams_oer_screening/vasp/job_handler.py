@@ -604,6 +604,138 @@ class Job_handler():
             "unrecoverable"
         )
 
+    def _recompute_candidate_progress(self) -> None:
+        """
+        Refresh the per-candidate progress projection on the candidates table.
+
+        For every candidate, derive the per-stage started/finalized counts and
+        the active/failed ``state`` purely from the processes table, in a single
+        whole-frame pass. Reads only lightweight scalar columns of the processes
+        df and writes 9 scalar columns onto the candidates df in place — it never
+        reads or copies the heavy ``study_obj``. Called as the final step of
+        ``update_log``; idempotent and self-healing (it creates the columns if a
+        resumed checkpoint predates them).
+
+        Counts are per LOGICAL UNIT, not per raw DFT sub-job:
+          - bulk:        0/1 per candidate (the magnetic batch is one unit)
+          - surface, O:  one DFT job each -> per-row counts
+          - OH:          per adsorption (termination, site); its 3 sub-jobs
+                         collapse to one unit
+        "started" = work initiated; "finalized" = terminal (failures included).
+        surface/O/OH counters stay <NA> until the candidate is eligible for that
+        stage (the previous stage produced a usable result), so
+        "n_X_started == 0" means "ready for stage X". ``state`` latches: once
+        'failed' it is never downgraded back to 'active'.
+        """
+        cdf = self.rframe.candidates.df          # write target (candidates)
+        pdf = self.rframe.processes.df           # read source (processes)
+        cid = cdf["candidate_id"]                # one id per candidate-row
+        jt = pdf["job_type"]                     # job_type per process-row
+
+        # (0) Per-process-row masks. `terminal` mirrors
+        # _is_terminal_process_status (vectorized); `completed` = succeeded.
+        terminal = (
+            pdf["status"].isin(["completed", "failed"])
+            | pdf["status"].fillna("").str.startswith("unrecoverable")
+        )
+        completed = pdf["status"] == "completed"
+
+        # Count process-rows-per-candidate for a row-mask, aligned to the
+        # candidates table (candidates with no match -> 0), as nullable Int64.
+        def per_cand(mask) -> pd.Series:
+            counts = pdf.loc[mask, "candidate_id"].value_counts()
+            return cid.map(counts).fillna(0).astype("Int64")
+
+        # nullable/object bool Series -> Int64 0/1 (NA -> 0).
+        def to01(bool_series) -> pd.Series:
+            return (
+                bool_series.fillna(False).astype(bool).astype("int64").astype("Int64")
+            )
+
+        # (1) INTERNAL success signals (not exposed): a stage is eligible only
+        # when the PREVIOUS stage produced a usable (completed) result.
+        succ_bulk = per_cand((jt == "bulk_relaxation") & completed)
+        succ_surf = per_cand((jt == "surface_relaxation") & completed)
+        succ_O = per_cand((jt == "O_adsorption") & completed)
+
+        # (2) Bulk magnetic batch: the relaxed-bulk "winner" exists only once all
+        # bulk sub-jobs are terminal and at least one succeeded.
+        bulk_mask = jt == "bulk_relaxation"
+        all_bulk_terminal = (
+            cid.map(
+                terminal[bulk_mask]
+                .groupby(pdf.loc[bulk_mask, "candidate_id"])
+                .all()
+            )
+            .fillna(False)
+            .astype(bool)
+        )
+        has_bulk = per_cand(bulk_mask) >= 1
+        bulk_winner = all_bulk_terminal & (succ_bulk >= 1)
+        failed_now = all_bulk_terminal & has_bulk & (succ_bulk == 0)
+
+        # (3) Eligibility cascade. `gate` keeps the count where eligible, else
+        # <NA> (preserving the nullable Int64 dtype).
+        surface_open = bulk_winner
+        O_open = surface_open & (succ_surf >= 1)
+        OH_open = O_open & (succ_O >= 1)
+
+        def gate(series, mask) -> pd.Series:
+            return series.where(mask.fillna(False))
+
+        # (4) EXPOSED per-logical-unit counts.
+        # bulk: collapse the magnetic batch to a single 0/1 (never gated).
+        cdf["n_bulk_started"] = to01(has_bulk)
+        cdf["n_bulk_finalized"] = to01(all_bulk_terminal)
+        # surface & O: one DFT job each -> per-row counts are already per-unit.
+        cdf["n_surface_started"] = gate(
+            per_cand(jt == "surface_relaxation"), surface_open
+        )
+        cdf["n_surface_finalized"] = gate(
+            per_cand((jt == "surface_relaxation") & terminal), surface_open
+        )
+        cdf["n_O_started"] = gate(per_cand(jt == "O_adsorption"), O_open)
+        cdf["n_O_finalized"] = gate(
+            per_cand((jt == "O_adsorption") & terminal), O_open
+        )
+        # OH: collapse the 3 sub-jobs per (termination, site) into one unit.
+        #   sites_started   = # distinct sites with OH jobs    (per candidate)
+        #   sites_finalized = # of those sites with ALL OH sub-jobs terminal
+        oh = jt == "OH_adsorption"
+        if bool(oh.any()):
+            grp = terminal[oh].groupby(
+                [
+                    pdf.loc[oh, "candidate_id"],
+                    pdf.loc[oh, "termination_index"],
+                    pdf.loc[oh, "site_index"],
+                ],
+                dropna=False,
+            )
+            sites_started = grp.size().groupby(level=0).size()
+            sites_finalized = grp.all().groupby(level=0).sum()
+        else:
+            sites_started = pd.Series(dtype="int64")
+            sites_finalized = pd.Series(dtype="int64")
+        cdf["n_OH_started"] = gate(
+            cid.map(sites_started).fillna(0).astype("Int64"), OH_open
+        )
+        cdf["n_OH_finalized"] = gate(
+            cid.map(sites_finalized).fillna(0).astype("Int64"), OH_open
+        )
+
+        # (5) state: 'active' unless the bulk batch settled with no success.
+        # Latches to 'failed' by reading the prior value (which may be absent
+        # when resuming a pre-change checkpoint -> treat as NA).
+        prior = (
+            cdf["state"]
+            if "state" in cdf.columns
+            else pd.Series(pd.NA, index=cdf.index)
+        )
+        state = pd.Series("active", index=cdf.index, dtype="string")
+        state[failed_now.fillna(False)] = "failed"                       # newly failed
+        state[(prior.astype("string") == "failed").fillna(False)] = "failed"  # latch
+        cdf["state"] = state
+
     def _get_adsorption_site_study(
         self,
         candidate_id: str,
@@ -1211,6 +1343,11 @@ class Job_handler():
                         self._update_candidate_oer_metrics(candt_id)
                         # Keep OH process rows unchanged until the full
                         # OH batch is terminal.
+
+        # Refresh the per-candidate progress projection (started/finalized
+        # counts + active/failed state) now that all process statuses for this
+        # cycle are settled. Whole-frame derived pass over the processes table.
+        self._recompute_candidate_progress()
         return updates
 
     # ------------------------------------------------------------------

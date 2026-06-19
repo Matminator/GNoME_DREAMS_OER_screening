@@ -49,8 +49,26 @@ class Explog:
             "study_obj": pd.Series(dtype="object"), # can store any Python object
             "G(O) deviation": pd.Series(dtype=pd.Float64Dtype()),
             "Overpotential_from_scaling": pd.Series(dtype=pd.Float64Dtype()),
-            "idealOverPotential": pd.Series(dtype=pd.Float64Dtype()) # nullable float (supports <NA>)
-
+            "idealOverPotential": pd.Series(dtype=pd.Float64Dtype()), # nullable float (supports <NA>)
+            # --- per-candidate progress projection ---
+            # Derived in Job_handler._recompute_candidate_progress and
+            # recomputed on every update_log(). Counts are per LOGICAL UNIT,
+            # not per raw DFT sub-job:
+            #   bulk -> 0/1 (one bulk relaxation per candidate, even though it
+            #           runs up to N magnetic sub-jobs internally)
+            #   OH   -> per adsorption (termination, site), not per 3 sub-jobs
+            # "started" = work initiated; "finalized" = terminal (incl failures).
+            # surface/O/OH counters stay <NA> until the candidate is eligible
+            # for that stage, so "n_X_started == 0" means "ready for stage X".
+            "n_bulk_started": pd.Series(dtype=pd.Int64Dtype()),
+            "n_bulk_finalized": pd.Series(dtype=pd.Int64Dtype()),
+            "n_surface_started": pd.Series(dtype=pd.Int64Dtype()),
+            "n_surface_finalized": pd.Series(dtype=pd.Int64Dtype()),
+            "n_O_started": pd.Series(dtype=pd.Int64Dtype()),
+            "n_O_finalized": pd.Series(dtype=pd.Int64Dtype()),
+            "n_OH_started": pd.Series(dtype=pd.Int64Dtype()),
+            "n_OH_finalized": pd.Series(dtype=pd.Int64Dtype()),
+            "state": pd.Series(dtype=pd.StringDtype()), # 'active' | 'failed'
         })
         rf.add_table("candidates", study_df, pk="candidate_id")
 
@@ -137,7 +155,13 @@ class Explog:
         new_candidate_row = {"candidate_id": candidate_id,
                              "reason_or_hypothesis": reason_or_hypothesis,
                              "notes": notes,
-                             "study_obj": study_obj}
+                             "study_obj": study_obj,
+                             # A fresh candidate is active and ready for bulk;
+                             # surface/O/OH counters stay <NA> (not eligible).
+                             # Recomputed (idempotently) on the next update_log.
+                             "state": "active",
+                             "n_bulk_started": 0,
+                             "n_bulk_finalized": 0}
         self.relational_frame.candidates.add_row(new_candidate_row,
                                                  allow_update=False)
 

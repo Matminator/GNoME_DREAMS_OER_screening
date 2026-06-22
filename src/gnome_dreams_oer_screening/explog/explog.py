@@ -69,6 +69,21 @@ class Explog:
             "n_OH_started": pd.Series(dtype=pd.Int64Dtype()),
             "n_OH_finalized": pd.Series(dtype=pd.Int64Dtype()),
             "state": pd.Series(dtype=pd.StringDtype()), # 'active' | 'failed'
+            # --- disposition gate ---
+            # Append-only list of disposition dicts
+            #   {Summary, Summarized_process_id, Future_plan, Decision}.
+            # Not exposed to the agent (dropped like study_obj); read via the
+            # get_disposition_info tool.
+            "disposition_record": pd.Series(dtype="object"),
+            # Decision of the latest disposition (one of
+            # var.DISPOSITION_DECISIONS). Agent-visible for filtering/sorting.
+            "decision": pd.Series(dtype=pd.StringDtype()),
+            # Write-lock forcing get-before-update; not exposed to the agent.
+            "ready_for_disposition_update": pd.Series(dtype=pd.BooleanDtype()),
+            # Derived in _recompute_disposition_state on every update_log():
+            # True when the candidate has finalized-but-undispositioned work.
+            # Agent-visible for filtering.
+            "needs_disposition_update": pd.Series(dtype=pd.BooleanDtype()),
         })
         rf.add_table("candidates", study_df, pk="candidate_id")
 
@@ -161,7 +176,15 @@ class Explog:
                              # Recomputed (idempotently) on the next update_log.
                              "state": "active",
                              "n_bulk_started": 0,
-                             "n_bulk_finalized": 0}
+                             "n_bulk_finalized": 0,
+                             # A fresh candidate has no finalized work yet, so it
+                             # is vacuously fully-dispositioned: no record, no
+                             # pending need, write-lock closed (a get must
+                             # precede any update). Recomputed on update_log.
+                             "disposition_record": [],
+                             "decision": None,
+                             "ready_for_disposition_update": False,
+                             "needs_disposition_update": False}
         self.relational_frame.candidates.add_row(new_candidate_row,
                                                  allow_update=False)
 

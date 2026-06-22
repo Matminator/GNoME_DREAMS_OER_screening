@@ -45,6 +45,7 @@ class Job_handler():
         require_relaxed_o_for_oh: bool = False,
         magnetic_bulk_n_max: int = 4,
         use_dipole_correction: bool = True,
+        legacy_disposition_exempt_ids: set | None = None,
         ) -> None:
 
         # Create the directory if it doesn't exist
@@ -76,6 +77,12 @@ class Job_handler():
         self.default_require_relaxed_o_for_oh = \
             require_relaxed_o_for_oh
         self.magnetic_bulk_n_max = magnetic_bulk_n_max
+        # Process ids exempt from the disposition coverage check (the legacy
+        # backlog, frozen at the disposition-gate rollout; see var.py). Consulted
+        # only by candidate_outstanding -- the agent always sees all ids.
+        self.legacy_disposition_exempt_ids = set(
+            int(x) for x in (legacy_disposition_exempt_ids or ())
+        )
 
     def enter_process(
         self,
@@ -667,7 +674,8 @@ class Job_handler():
                 .groupby(pdf.loc[bulk_mask, "candidate_id"])
                 .all()
             )
-            .fillna(False)
+            .astype("boolean")  # object {True,False,NaN} -> nullable boolean
+            .fillna(False)      # fill on a real dtype -> no silent object downcast
             .astype(bool)
         )
         has_bulk = per_cand(bulk_mask) >= 1
@@ -735,6 +743,168 @@ class Job_handler():
         state[failed_now.fillna(False)] = "failed"                       # newly failed
         state[(prior.astype("string") == "failed").fillna(False)] = "failed"  # latch
         cdf["state"] = state
+
+    # ------------------------------------------------------------------
+    # Disposition coverage engine (single source of truth for Gate 1,
+    # needs_disposition_update, and the get_disposition_info tool).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _na_to_none_int(v):
+        """pandas NA/NaN -> None; otherwise a plain int (JSON-friendly units)."""
+        if v is None or pd.isna(v):
+            return None
+        return int(v)
+
+    def _candidate_dispositions(self, candidate_id) -> list:
+        """The candidate's disposition_record as a list (empty if absent/NA)."""
+        cdf = self.rframe.candidates.df
+        if "disposition_record" not in cdf.columns:
+            return []
+        mask = cdf["candidate_id"] == candidate_id
+        if not mask.any():
+            return []
+        rec = cdf.loc[mask, "disposition_record"].iloc[0]
+        return rec if isinstance(rec, list) else []
+
+    def _candidate_finalized_units(self, candidate_id) -> list:
+        """Enumerate the candidate's batch-collapsed FINALIZED units.
+
+        Each unit is {job_type, termination_index, site_index, ids:[int]}.
+        A unit is finalized iff all its (batch) sub-jobs are terminal:
+          bulk    -> one unit (all magnetic sub-jobs collapse together);
+          surface -> one unit per terminal row;
+          O       -> one unit per terminal row;
+          OH      -> one unit per (termination, site) with all 3 sub-jobs
+                     terminal (collapsed inline, side-effect-free).
+        "finalized"/"terminal" includes failures and unrecoverable.
+        """
+        pdf = self.rframe.processes.df
+        sub = pdf[pdf["candidate_id"] == candidate_id]
+        units: list = []
+        if sub.empty:
+            return units
+
+        # bulk: a single collapsed unit, finalized iff the whole magnetic batch
+        # is terminal (reuses the existing batch-terminality check).
+        bulk = sub[sub["job_type"] == "bulk_relaxation"]
+        if not bulk.empty and self._all_magnetic_bulk_terminal(candidate_id):
+            units.append({
+                "job_type": "bulk_relaxation",
+                "termination_index": None,
+                "site_index": None,
+                "ids": sorted(int(x) for x in bulk["process_id"].tolist()),
+            })
+
+        # surface, O: one DFT job each -> one unit per terminal row.
+        for jt in ("surface_relaxation", "O_adsorption"):
+            for _, r in sub[sub["job_type"] == jt].iterrows():
+                if self._is_terminal_process_status(r["status"]):
+                    units.append({
+                        "job_type": jt,
+                        "termination_index": self._na_to_none_int(
+                            r["termination_index"]
+                        ),
+                        "site_index": self._na_to_none_int(r["site_index"]),
+                        "ids": [int(r["process_id"])],
+                    })
+
+        # OH: collapse the 3 sub-jobs per (termination, site); finalized iff all
+        # terminal. Inline (NOT _refresh_oh_batch_finalization_state, which would
+        # mutate the study object) to keep this helper pure for the tools.
+        oh = sub[sub["job_type"] == "OH_adsorption"]
+        if not oh.empty:
+            for (term, site), grp in oh.groupby(
+                ["termination_index", "site_index"], dropna=False
+            ):
+                if grp["status"].apply(self._is_terminal_process_status).all():
+                    units.append({
+                        "job_type": "OH_adsorption",
+                        "termination_index": self._na_to_none_int(term),
+                        "site_index": self._na_to_none_int(site),
+                        "ids": sorted(int(x) for x in grp["process_id"].tolist()),
+                    })
+        return units
+
+    def candidate_outstanding(self, candidate_id) -> dict:
+        """Outstanding disposition state for one candidate -- the single source
+        of truth shared by the disposition tools and _recompute_disposition_state.
+
+        Returns {must_cover, legacy_optional, latest_disposition, has_finalized}:
+          - must_cover:      finalized units neither covered nor exempt (the
+                             agent must cite >=1 id of each before it may wait);
+          - legacy_optional: finalized units uncovered but exempt via the legacy
+                             set L (citing them is optional);
+          - latest_disposition: last disposition dict, or None;
+          - has_finalized:   whether any finalized unit exists at all.
+        A unit is COVERED iff a disposition's Summarized_process_id intersects
+        its ids (citing any one sub-job covers the batch); EXEMPT iff all its
+        ids are in the legacy set L.
+        """
+        units = self._candidate_finalized_units(candidate_id)
+        L = set(getattr(self, "legacy_disposition_exempt_ids", set()) or set())
+        recs = self._candidate_dispositions(candidate_id)
+        covered: set = set()
+        for rec in recs:
+            for pid in (rec.get("Summarized_process_id") or []):
+                covered.add(int(pid))
+        must_cover, legacy_optional = [], []
+        for u in units:
+            ids = set(u["ids"])
+            if ids & covered:
+                continue
+            if ids <= L:
+                legacy_optional.append(u)
+            else:
+                must_cover.append(u)
+        return {
+            "must_cover": must_cover,
+            "legacy_optional": legacy_optional,
+            "latest_disposition": recs[-1] if recs else None,
+            "has_finalized": len(units) > 0,
+        }
+
+    def _recompute_disposition_state(self) -> None:
+        """Refresh needs_disposition_update on the candidates table.
+
+        Runs as a step of update_log(), right after
+        _recompute_candidate_progress. Self-healing: creates the four
+        disposition columns if a resumed checkpoint predates them. Writes ONLY
+        needs_disposition_update; `decision` and `ready_for_disposition_update`
+        are owned by the disposition tools.
+            needs = (must_cover non-empty)
+                    OR (no disposition yet AND the candidate has finalized work)
+        """
+        cdf = self.rframe.candidates.df
+        idx = cdf.index
+        if "disposition_record" not in cdf.columns:
+            cdf["disposition_record"] = pd.Series(
+                [[] for _ in range(len(cdf))], index=idx, dtype="object"
+            )
+        if "decision" not in cdf.columns:
+            cdf["decision"] = pd.Series(
+                [pd.NA] * len(cdf), index=idx, dtype="string"
+            )
+        if "ready_for_disposition_update" not in cdf.columns:
+            cdf["ready_for_disposition_update"] = pd.Series(
+                [False] * len(cdf), index=idx, dtype="boolean"
+            )
+        if "needs_disposition_update" not in cdf.columns:
+            cdf["needs_disposition_update"] = pd.Series(
+                [False] * len(cdf), index=idx, dtype="boolean"
+            )
+        if len(cdf) == 0:
+            return
+        needs = []
+        for cid in cdf["candidate_id"].tolist():
+            out = self.candidate_outstanding(cid)
+            need = bool(out["must_cover"]) or (
+                out["latest_disposition"] is None and out["has_finalized"]
+            )
+            needs.append(bool(need))
+        cdf["needs_disposition_update"] = pd.Series(
+            needs, index=idx, dtype="boolean"
+        )
 
     def _get_adsorption_site_study(
         self,
@@ -1348,6 +1518,9 @@ class Job_handler():
         # counts + active/failed state) now that all process statuses for this
         # cycle are settled. Whole-frame derived pass over the processes table.
         self._recompute_candidate_progress()
+        # Refresh the disposition coverage projection (needs_disposition_update)
+        # from the now-settled process statuses + the dispositions on record.
+        self._recompute_disposition_state()
         return updates
 
     # ------------------------------------------------------------------

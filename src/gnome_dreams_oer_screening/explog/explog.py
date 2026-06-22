@@ -24,6 +24,7 @@ class Explog:
         reject_if_failed_exists: bool = False,
         require_relaxed_o_for_oh: bool = False,
         magnetic_bulk_n_max: int = 4,
+        legacy_disposition_exempt_ids: set | None = None,
         ):
         """
         Initialize the experiment log and attached job handler.
@@ -132,6 +133,7 @@ class Explog:
             reject_if_failed_exists=reject_if_failed_exists,
             require_relaxed_o_for_oh=require_relaxed_o_for_oh,
             magnetic_bulk_n_max=magnetic_bulk_n_max,
+            legacy_disposition_exempt_ids=legacy_disposition_exempt_ids,
         )
         
     def _save_pickle(self) -> None:

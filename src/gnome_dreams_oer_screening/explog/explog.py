@@ -25,6 +25,7 @@ class Explog:
         require_relaxed_o_for_oh: bool = False,
         magnetic_bulk_n_max: int = 4,
         legacy_disposition_exempt_ids: set | None = None,
+        disposition_decisions=None,
         ):
         """
         Initialize the experiment log and attached job handler.
@@ -134,6 +135,7 @@ class Explog:
             require_relaxed_o_for_oh=require_relaxed_o_for_oh,
             magnetic_bulk_n_max=magnetic_bulk_n_max,
             legacy_disposition_exempt_ids=legacy_disposition_exempt_ids,
+            disposition_decisions=disposition_decisions,
         )
         
     def _save_pickle(self) -> None:
@@ -273,6 +275,110 @@ class Explog:
     def update_log(self):
         result = self.job_handler.update_log()
         self._save_pickle()
+        return result
+
+    def get_disposition_info(self, candidate_id: str) -> dict:
+        """Mark a candidate ready for a disposition write and return its
+        outstanding-coverage info (the structured data the agent summarizes).
+
+        Refreshes the disposition columns / needs flag, sets
+        ``ready_for_disposition_update = True``, and returns
+        ``candidate_outstanding(candidate_id)``. The agent-facing sentence is
+        built from the result by ``src/disposition_messages.py``.
+        """
+        self.job_handler._recompute_disposition_state()
+        cdf = self.relational_frame.candidates.df
+        mask = cdf["candidate_id"] == candidate_id
+        cdf.loc[mask, "ready_for_disposition_update"] = True
+        self._save_pickle()
+        return self.job_handler.candidate_outstanding(candidate_id)
+
+    def update_disposition_info(
+        self,
+        candidate_id: str,
+        summary: str,
+        summarized_process_id,
+        future_plan: str,
+        decision: str,
+    ) -> dict:
+        """Record (or reject) a disposition for a candidate.
+
+        Returns a structured result
+        ``{ok, status, candidate_id, decision, missing, ids}``; the
+        agent-facing sentence is built from it by ``src/disposition_messages.py``.
+
+        Write-lock: ONLY a successful write clears
+        ``ready_for_disposition_update`` -- incomplete coverage and validation
+        failures leave it set so the agent can retry without re-reading.
+        """
+        jh = self.job_handler
+        cdf = self.relational_frame.candidates.df
+        mask = cdf["candidate_id"] == candidate_id
+        result = {
+            "ok": False, "status": None, "candidate_id": candidate_id,
+            "decision": decision, "missing": [], "ids": [],
+        }
+
+        # (0) the candidate must exist (otherwise the .iloc[0] reads below fail).
+        if not mask.any():
+            result["status"] = "unknown_candidate"
+            return result
+
+        # (1) write-lock: get_disposition_info must have run first.
+        ready_val = cdf.loc[mask, "ready_for_disposition_update"].iloc[0]
+        if not (pd.notna(ready_val) and bool(ready_val)):
+            result["status"] = "locked"
+            return result
+
+        # (2) Decision must be in the allowed vocabulary (sourced from var.py).
+        allowed = getattr(jh, "disposition_decisions", ()) or ()
+        if allowed and decision not in allowed:
+            result["status"] = "invalid_decision"
+            return result
+
+        # (3) every cited process id must be terminal (finalized).
+        pdf = self.relational_frame.processes.df
+        cited = [int(i) for i in (summarized_process_id or [])]
+        non_terminal = []
+        for pid in cited:
+            rows = pdf[pdf["process_id"] == pid]
+            status = rows["status"].iloc[0] if not rows.empty else None
+            if not jh._is_terminal_process_status(status):
+                non_terminal.append(pid)
+        if non_terminal:
+            result["status"] = "non_terminal_ids"
+            result["ids"] = non_terminal
+            return result
+
+        # (4) coverage: the cited ids must cover every required (non-exempt) unit.
+        out = jh.candidate_outstanding(candidate_id)
+        cited_set = set(cited)
+        uncovered = [u for u in out["must_cover"]
+                     if not (set(u["ids"]) & cited_set)]
+        if uncovered:
+            result["status"] = "incomplete"
+            result["missing"] = sorted(
+                {int(i) for u in uncovered for i in u["ids"]}
+            )
+            return result  # nothing written -> ready stays True
+
+        # (5) success: append the disposition and update the flags.
+        idx = cdf.index[mask][0]
+        existing = cdf.at[idx, "disposition_record"]
+        if not isinstance(existing, list):
+            existing = []
+        cdf.at[idx, "disposition_record"] = existing + [{
+            "Summary": summary,
+            "Summarized_process_id": cited,
+            "Future_plan": future_plan,
+            "Decision": decision,
+        }]
+        cdf.loc[mask, "decision"] = decision
+        cdf.loc[mask, "ready_for_disposition_update"] = False
+        jh._recompute_disposition_state()   # refresh needs from the new record
+        self._save_pickle()
+        result["ok"] = True
+        result["status"] = "ok"
         return result
 
 EXPLOG = Explog()

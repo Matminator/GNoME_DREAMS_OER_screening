@@ -46,6 +46,7 @@ class Job_handler():
         magnetic_bulk_n_max: int = 4,
         use_dipole_correction: bool = True,
         legacy_disposition_exempt_ids: set | None = None,
+        disposition_decisions=None,
         ) -> None:
 
         # Create the directory if it doesn't exist
@@ -83,6 +84,9 @@ class Job_handler():
         self.legacy_disposition_exempt_ids = set(
             int(x) for x in (legacy_disposition_exempt_ids or ())
         )
+        # Allowed Decision vocabulary (sourced from var.py, passed at init);
+        # used by Explog.update_disposition_info validation + message.
+        self.disposition_decisions = tuple(disposition_decisions or ())
 
     def enter_process(
         self,

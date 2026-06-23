@@ -910,6 +910,44 @@ class Job_handler():
             needs, index=idx, dtype="boolean"
         )
 
+    def count_pending(self) -> int:
+        """Number of processes in the 'pending' (queued, not yet running) state.
+
+        Gate 2 of wait_for_update compares this against var.QUEUE_MIN_PENDING --
+        a deliberate queued backlog so HPC nodes never drain.
+        """
+        pdf = self.rframe.processes.df
+        if "status" not in pdf.columns or len(pdf) == 0:
+            return 0
+        return int((pdf["status"] == "pending").sum())
+
+    def finalized_exit_ids(self, process_ids) -> set:
+        """Batch-aware wait-exit filter for wait_for_update.
+
+        Given the process ids that just reached a terminal status this poll,
+        return the FULL id set of every finalized batch unit they belong to:
+          - surface/O: a single-job unit -> the id maps to itself;
+          - bulk/OH:   ANY one terminal sub-job of a fully-terminal batch
+                       expands to that whole unit's ids (so the exit report is
+                       complete no matter which poll finished which sub-job);
+          - a sub-job whose batch is NOT yet fully terminal contributes nothing,
+            so an all-partial poll returns an empty set and the wait continues.
+        Reuses _candidate_finalized_units, so it matches the coverage /
+        disposition semantics exactly.
+        """
+        pdf = self.rframe.processes.df
+        want = {int(p) for p in process_ids}
+        if not want or "process_id" not in pdf.columns:
+            return set()
+        cands = pdf.loc[pdf["process_id"].isin(want), "candidate_id"].unique()
+        exit_ids: set = set()
+        for cid in cands:
+            for u in self._candidate_finalized_units(cid):
+                unit_ids = set(u["ids"])
+                if want & unit_ids:        # this poll touched this finalized unit
+                    exit_ids |= unit_ids   # -> surface the WHOLE unit
+        return exit_ids
+
     def _get_adsorption_site_study(
         self,
         candidate_id: str,

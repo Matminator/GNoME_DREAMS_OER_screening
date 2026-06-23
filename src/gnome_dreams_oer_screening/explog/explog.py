@@ -277,6 +277,22 @@ class Explog:
         self._save_pickle()
         return result
 
+    def candidates_needing_disposition(self) -> list:
+        """Candidate ids that block waiting (Gate 1): those with finalized work
+        not yet fully dispositioned.
+
+        Recomputes the derived ``needs_disposition_update`` flag from the
+        currently loaded frame (cheap; no HPC poll) so the answer reflects the
+        latest known log state, then returns the flagged candidates. The wait
+        tool refuses to wait while this is non-empty.
+        """
+        self.job_handler._recompute_disposition_state()
+        cdf = self.relational_frame.candidates.df
+        if "needs_disposition_update" not in cdf.columns or len(cdf) == 0:
+            return []
+        mask = cdf["needs_disposition_update"].astype("boolean").fillna(False)
+        return [str(c) for c in cdf.loc[mask, "candidate_id"].tolist()]
+
     def get_disposition_info(self, candidate_id: str) -> dict:
         """Mark a candidate ready for a disposition write and return its
         outstanding-coverage info (the structured data the agent summarizes).

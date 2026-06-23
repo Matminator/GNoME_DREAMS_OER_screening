@@ -299,12 +299,17 @@ class Explog:
 
         Refreshes the disposition columns / needs flag, sets
         ``ready_for_disposition_update = True``, and returns
-        ``candidate_outstanding(candidate_id)``. The agent-facing sentence is
-        built from the result by ``src/disposition_messages.py``.
+        ``candidate_outstanding(candidate_id)`` -- or ``{"unknown_candidate":
+        True}`` when the candidate is not in the log (symmetric with
+        update_disposition_info, so a bad id never reads like a vacuous success).
+        The agent-facing sentence is built from the result by
+        ``src/disposition_messages.py``.
         """
         self.job_handler._recompute_disposition_state()
         cdf = self.relational_frame.candidates.df
         mask = cdf["candidate_id"] == candidate_id
+        if not mask.any():
+            return {"unknown_candidate": True, "candidate_id": candidate_id}
         cdf.loc[mask, "ready_for_disposition_update"] = True
         self._save_pickle()
         return self.job_handler.candidate_outstanding(candidate_id)
@@ -328,6 +333,10 @@ class Explog:
         failures leave it set so the agent can retry without re-reading.
         """
         jh = self.job_handler
+        # Self-heal the four disposition columns before any column read, so a
+        # resumed pre-rollout checkpoint that predates them cannot KeyError here
+        # (it returns "locked" via the write-lock check instead).
+        jh._recompute_disposition_state()
         cdf = self.relational_frame.candidates.df
         mask = cdf["candidate_id"] == candidate_id
         result = {
@@ -352,9 +361,22 @@ class Explog:
             result["status"] = "invalid_decision"
             return result
 
-        # (3) every cited process id must be terminal (finalized).
         pdf = self.relational_frame.processes.df
         cited = [int(i) for i in (summarized_process_id or [])]
+
+        # (3) every cited id must belong to THIS candidate (catches ids copied
+        # from another candidate, or ids that do not exist at all).
+        own_ids = set(
+            int(x) for x in
+            pdf.loc[pdf["candidate_id"] == candidate_id, "process_id"].tolist()
+        )
+        foreign = [pid for pid in cited if pid not in own_ids]
+        if foreign:
+            result["status"] = "foreign_ids"
+            result["ids"] = foreign
+            return result
+
+        # (4) every cited process id must be terminal (finalized).
         non_terminal = []
         for pid in cited:
             rows = pdf[pdf["process_id"] == pid]
@@ -366,7 +388,7 @@ class Explog:
             result["ids"] = non_terminal
             return result
 
-        # (4) coverage: the cited ids must cover every required (non-exempt) unit.
+        # (5) coverage: the cited ids must cover every required (non-exempt) unit.
         out = jh.candidate_outstanding(candidate_id)
         cited_set = set(cited)
         uncovered = [u for u in out["must_cover"]
@@ -378,7 +400,7 @@ class Explog:
             )
             return result  # nothing written -> ready stays True
 
-        # (5) success: append the disposition and update the flags.
+        # (6) success: append the disposition and update the flags.
         idx = cdf.index[mask][0]
         existing = cdf.at[idx, "disposition_record"]
         if not isinstance(existing, list):

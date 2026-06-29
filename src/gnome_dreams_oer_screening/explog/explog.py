@@ -419,5 +419,23 @@ class Explog:
         result["status"] = "ok"
         return result
 
+    def mark_candidate_failed(self, candidate_id: str) -> None:
+        """Latch a candidate's state to 'failed' and persist it.
+
+        Used when bulk setup fails before any process row is entered (e.g. the
+        magnetic enumeration raises). The latch in _recompute_candidate_progress
+        then keeps state == 'failed' on every later recompute, and
+        find_forgotten_jobs / the wait-tool hints skip 'failed' candidates. The
+        explicit _save_pickle is needed because the failing add_process aborts
+        before its own save. No-op for an unknown candidate id.
+        """
+        cdf = self.relational_frame.candidates.df
+        if not (cdf["candidate_id"] == candidate_id).any():
+            return
+        self.relational_frame.candidates.set_value(
+            candidate_id, "state", "failed", allow_new_columns=True
+        )
+        self._save_pickle()
+
 EXPLOG = Explog()
     

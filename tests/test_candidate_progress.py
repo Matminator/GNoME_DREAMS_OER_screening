@@ -400,3 +400,63 @@ def test_recompute_on_empty_frame_does_not_raise(tmp_path):
     # the new columns exist on the (empty) schema
     for col in ("state", "n_bulk_started", "n_OH_finalized"):
         assert col in explog.relational_frame.candidates.df.columns
+
+
+# ---------------------------------------------------------------------------
+# Bulk magnetic-enumeration failure: candidate is recorded as failed even though
+# no bulk process row was ever entered (pymatgen raises before entry).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.mini
+def test_manual_failed_state_latches_without_a_failed_row(tmp_path, tio2_rutile_atoms):
+    # A candidate whose bulk enumeration failed has NO process rows; mark_candidate_failed
+    # latches state='failed'. The recompute on the next update_log must PRESERVE it (the
+    # latch in _recompute_candidate_progress), not reset it to 'active'.
+    explog = Explog()
+    explog.init(tmp_path, mode="test")
+    cid = "broken"
+    explog.add_candidate(candidate_id=cid, study_obj=_new_study(tio2_rutile_atoms),
+                         reason_or_hypothesis="enumeration failed -> no process rows")
+    explog.relational_frame.candidates.set_value(
+        cid, "state", "failed", allow_new_columns=True)
+    explog.update_log()                                # recompute must LATCH, not reset
+    assert _val(explog, cid, "state") == "failed"
+
+
+@pytest.mark.mini
+def test_mark_candidate_failed_sets_latches_and_ignores_unknown(tmp_path, tio2_rutile_atoms):
+    explog = Explog()
+    explog.init(tmp_path, mode="test")
+    cid = "broken"
+    explog.add_candidate(candidate_id=cid, study_obj=_new_study(tio2_rutile_atoms),
+                         reason_or_hypothesis="bulk enumeration failed")
+    explog.mark_candidate_failed(cid)
+    assert _val(explog, cid, "state") == "failed"
+    explog.update_log()                                # survives a recompute
+    assert _val(explog, cid, "state") == "failed"
+    explog.mark_candidate_failed("does-not-exist")     # unknown id -> no-op, no crash
+
+
+@pytest.mark.mini
+def test_bulk_enumeration_failure_raises_and_enters_no_rows(
+        tmp_path, tio2_rutile_atoms, monkeypatch):
+    # When the magnetic enumeration raises (pymatgen ValueError "Too many magnetic
+    # sites..."), enter_process must translate it to MagneticEnumerationError and leave
+    # NO bulk process rows behind.
+    from gnome_dreams_oer_screening.vasp import job_handler as jh_mod
+    from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
+        MagneticEnumerationError)
+    explog = Explog()
+    explog.init(tmp_path, mode="test")
+    cid = "tio2"
+    explog.add_candidate(candidate_id=cid, study_obj=_new_study(tio2_rutile_atoms),
+                         reason_or_hypothesis="enum failure")
+
+    def _boom(*args, **kwargs):
+        raise ValueError("Too many magnetic sites to sensibly perform enumeration.")
+    monkeypatch.setattr(jh_mod, "enumerate_magnetic_structures", _boom)
+
+    with pytest.raises(MagneticEnumerationError):
+        explog.add_process(candidate_id=cid, calculation_type="bulk_relaxation")
+    pdf = explog.relational_frame.processes.df
+    assert len(pdf[pdf["candidate_id"] == cid]) == 0   # no rows entered

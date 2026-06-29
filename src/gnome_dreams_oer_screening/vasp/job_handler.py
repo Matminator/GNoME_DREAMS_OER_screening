@@ -14,6 +14,7 @@ from gnome_dreams_oer_screening.vasp.vasp_calculation import (
 from gnome_dreams_oer_screening.vasp.magnetic_enumeration import (
     enumerate_magnetic_structures,
     extract_mag_config_index,
+    MagneticEnumerationError,
 )
 from gnome_dreams_oer_screening.vasp.job_validation import (
     validate_enter_process)
@@ -219,9 +220,21 @@ class Job_handler():
         # process per config. Configs are stored once on the study object.
         if job_type == "bulk_relaxation":
             study_obj = self.rframe.candidates[candidate_id].df["study_obj"].values[0]
-            configs = enumerate_magnetic_structures(
-                study_obj.get_init_structure(), self.magnetic_bulk_n_max
-            )
+            try:
+                configs = enumerate_magnetic_structures(
+                    study_obj.get_init_structure(), self.magnetic_bulk_n_max
+                )
+            except Exception as e:
+                # The structure cannot be set up for the magnetic bulk batch -- pymatgen
+                # raises a generic ValueError (e.g. "Too many magnetic sites to sensibly
+                # perform enumeration."). Re-raise as a SPECIFIC error so the submit tool
+                # can mark this candidate failed, WITHOUT keying on a generic exception
+                # type that the unrelated add_process failures (duplicate / validation /
+                # bad id) would also match.
+                raise MagneticEnumerationError(
+                    f"Magnetic-ordering enumeration failed for candidate "
+                    f"{candidate_id}: {e}"
+                ) from e
             study_obj.store_mag_bulk_configs(configs)
             process_ids = []
             for i, config in enumerate(configs):

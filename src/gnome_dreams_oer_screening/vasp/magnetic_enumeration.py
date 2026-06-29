@@ -5,6 +5,13 @@ from pymatgen.analysis.magnetism.analyzer import DEFAULT_MAGMOMS, MagneticStruct
 from pymatgen.core import Composition
 
 
+class MagneticEnumerationError(Exception):
+    """Raised when magnetic-ordering enumeration cannot produce a usable set of
+    bulk configurations for a candidate (e.g. too many magnetic sites). The
+    candidate cannot start the bulk pipeline and should be marked failed rather
+    than re-attempted (a retry would fail identically)."""
+
+
 def count_magnetic_sites_from_formula(formula: str) -> int:
     """Count total magnetic atoms in a formula string using pymatgen's DEFAULT_MAGMOMS.
 

@@ -47,11 +47,14 @@ class Explog:
         study_df = pd.DataFrame({
             "candidate_id": pd.Series(dtype=pd.StringDtype()),
             # AQ-GNoME "Reduced Formula" for this candidate (candidate_id ==
-            # AQ-GNoME MaterialId). This package has no aq_gnome dependency,
-            # so the value is looked up by the caller and passed into
-            # add_candidate; self-healed (column created, NA-filled) on
-            # update_log() for checkpoints that predate this column.
-            "reduced_formula": pd.Series(dtype=pd.StringDtype()),
+            # AQ-GNoME MaterialId), stored under that EXACT name for
+            # consistency with OER_data_analasis_v2/get_candidate_data/
+            # browse_df, which all use the same AQ-GNoME field name. This
+            # package has no aq_gnome dependency, so the value is looked up
+            # by the caller and passed into add_candidate; self-healed
+            # (column created, NA-filled) on update_log() for checkpoints
+            # that predate this column.
+            "Reduced Formula": pd.Series(dtype=pd.StringDtype()),
             "reason_or_hypothesis": pd.Series(dtype=pd.StringDtype()),
             "notes": pd.Series(dtype=pd.StringDtype()),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
@@ -173,12 +176,13 @@ class Explog:
                       notes: str | None = None,
                       reduced_formula: str | None = None) -> None:
 
-        # Self-heal reduced_formula before writing: new_candidate_row always
-        # includes that key, so on a resumed pre-feature checkpoint (column
-        # missing entirely) this would otherwise raise "unknown columns" if
-        # add_candidate is the first EXPLOG call after resume -- i.e. before
-        # any update_log()-triggering tool call has had a chance to self-heal
-        # it first. Safe/idempotent to call unconditionally.
+        # Self-heal the Reduced Formula column before writing:
+        # new_candidate_row always includes that key, so on a resumed
+        # pre-feature checkpoint (column missing entirely) this would
+        # otherwise raise "unknown columns" if add_candidate is the first
+        # EXPLOG call after resume -- i.e. before any update_log()-triggering
+        # tool call has had a chance to self-heal it first. Safe/idempotent
+        # to call unconditionally.
         self.job_handler._ensure_reduced_formula_column()
 
         if candidate_id in \
@@ -187,7 +191,7 @@ class Explog:
                               "already exists in the log.")
 
         new_candidate_row = {"candidate_id": candidate_id,
-                             "reduced_formula": reduced_formula,
+                             "Reduced Formula": reduced_formula,
                              "reason_or_hypothesis": reason_or_hypothesis,
                              "notes": notes,
                              "study_obj": study_obj,

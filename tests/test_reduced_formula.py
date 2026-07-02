@@ -1,13 +1,18 @@
-# Tests for the persisted `reduced_formula` column on the candidates table,
+# Tests for the persisted `Reduced Formula` column on the candidates table,
 # written test-FIRST (TDD). This column holds the AQ-GNoME "Reduced Formula"
-# string for each candidate (candidate_id == AQ-GNoME MaterialId). The value
-# itself is looked up by the caller (src/tools.py, which has access to the
-# AQ-GNoME database) and passed into add_candidate -- this package has no
-# aq_gnome dependency and never does the lookup itself.
+# string for each candidate (candidate_id == AQ-GNoME MaterialId), stored
+# under that EXACT name (matching AQ-GNoME) for consistency across the whole
+# repo -- OER_data_analasis_v2/get_candidate_data/browse_df all use the same
+# "Reduced Formula" name. The value itself is looked up by the caller
+# (src/tools.py, which has access to the AQ-GNoME database) and passed into
+# add_candidate -- this package has no aq_gnome dependency and never does the
+# lookup itself. Note: add_candidate's Python parameter is still spelled
+# reduced_formula (snake_case) since Python identifiers can't contain spaces
+# -- only the stored DataFrame column name is "Reduced Formula".
 #
 # Contract pinned here:
 #   Explog.add_candidate(..., reduced_formula: str | None = None) stores the
-#     value (or <NA> if omitted) in a new "reduced_formula" column.
+#     value (or <NA> if omitted) in a new "Reduced Formula" column.
 #   The column is the 2nd column of the candidates table (right after
 #     candidate_id) -- "one of the first columns".
 #   Job_handler.update_log() self-heals the column (creates it, NA-filled) if
@@ -43,21 +48,21 @@ def test_add_candidate_stores_reduced_formula(tmp_path):
     explog = _explog(tmp_path)
     explog.add_candidate(candidate_id="c", study_obj=object(),
                          reason_or_hypothesis="r", reduced_formula="RuO2")
-    assert _val(explog, "c", "reduced_formula") == "RuO2"
+    assert _val(explog, "c", "Reduced Formula") == "RuO2"
 
 
 def test_add_candidate_without_reduced_formula_is_na(tmp_path):
     explog = _explog(tmp_path)
     explog.add_candidate(candidate_id="c", study_obj=object(),
                          reason_or_hypothesis="r")
-    assert pd.isna(_val(explog, "c", "reduced_formula"))
+    assert pd.isna(_val(explog, "c", "Reduced Formula"))
 
 
 def test_reduced_formula_is_second_column(tmp_path):
     explog = _explog(tmp_path)
     cols = list(explog.relational_frame.candidates.df.columns)
     assert cols[0] == "candidate_id"
-    assert cols[1] == "reduced_formula"
+    assert cols[1] == "Reduced Formula"
 
 
 def test_self_heals_missing_reduced_formula_column_on_update_log(tmp_path):
@@ -66,12 +71,12 @@ def test_self_heals_missing_reduced_formula_column_on_update_log(tmp_path):
     explog.add_candidate(candidate_id="c", study_obj=object(),
                          reason_or_hypothesis="r", reduced_formula="RuO2")
     cdf = explog.relational_frame.candidates.df
-    explog.relational_frame.candidates.df = cdf.drop(columns=["reduced_formula"])
+    explog.relational_frame.candidates.df = cdf.drop(columns=["Reduced Formula"])
     explog.update_log()  # must self-heal, not raise
-    assert "reduced_formula" in explog.relational_frame.candidates.df.columns
+    assert "Reduced Formula" in explog.relational_frame.candidates.df.columns
     # Self-heal only creates the column (NA-filled); it cannot recover the
     # original value since this package has no AQ-GNoME access.
-    assert pd.isna(_val(explog, "c", "reduced_formula"))
+    assert pd.isna(_val(explog, "c", "Reduced Formula"))
 
 
 def test_self_heal_does_not_clobber_existing_values(tmp_path):
@@ -79,32 +84,32 @@ def test_self_heal_does_not_clobber_existing_values(tmp_path):
     explog.add_candidate(candidate_id="c", study_obj=object(),
                          reason_or_hypothesis="r", reduced_formula="RuO2")
     explog.update_log()
-    assert _val(explog, "c", "reduced_formula") == "RuO2"
+    assert _val(explog, "c", "Reduced Formula") == "RuO2"
 
 
 def test_empty_frame_no_raise(tmp_path):
     explog = _explog(tmp_path)
     explog.update_log()
     assert len(explog.relational_frame.candidates.df) == 0
-    assert "reduced_formula" in explog.relational_frame.candidates.df.columns
+    assert "Reduced Formula" in explog.relational_frame.candidates.df.columns
 
 
 def test_add_candidate_self_heals_without_update_log_first(tmp_path):
     # Simulate a resumed pre-feature checkpoint whose candidates.df predates
     # the column entirely, where add_candidate is the FIRST EXPLOG call after
     # resume -- no update_log() has run yet, so its self-heal hasn't fired.
-    # add_candidate must not raise "unknown columns ['reduced_formula']".
+    # add_candidate must not raise "unknown columns ['Reduced Formula']".
     explog = _explog(tmp_path)
     explog.add_candidate(candidate_id="old", study_obj=object(),
                          reason_or_hypothesis="r", reduced_formula="TiO2")
     cdf = explog.relational_frame.candidates.df
-    explog.relational_frame.candidates.df = cdf.drop(columns=["reduced_formula"])
+    explog.relational_frame.candidates.df = cdf.drop(columns=["Reduced Formula"])
 
     explog.add_candidate(candidate_id="new", study_obj=object(),
                          reason_or_hypothesis="r", reduced_formula="RuO2")
 
-    assert "reduced_formula" in explog.relational_frame.candidates.df.columns
-    assert _val(explog, "new", "reduced_formula") == "RuO2"
+    assert "Reduced Formula" in explog.relational_frame.candidates.df.columns
+    assert _val(explog, "new", "Reduced Formula") == "RuO2"
     # The self-heal (schema only) also reaches the pre-existing row, but it
     # cannot recover a value this package never had -- stays <NA>.
-    assert pd.isna(_val(explog, "old", "reduced_formula"))
+    assert pd.isna(_val(explog, "old", "Reduced Formula"))

@@ -48,13 +48,19 @@ class Explog:
             "candidate_id": pd.Series(dtype=pd.StringDtype()),
             # AQ-GNoME "Reduced Formula" for this candidate (candidate_id ==
             # AQ-GNoME MaterialId), stored under that EXACT name for
-            # consistency with OER_data_analasis_v2/get_candidate_data/
-            # browse_df, which all use the same AQ-GNoME field name. This
-            # package has no aq_gnome dependency, so the value is looked up
-            # by the caller and passed into add_candidate; self-healed
-            # (column created, NA-filled) on update_log() for checkpoints
-            # that predate this column.
+            # consistency with OER_data_analasis_v2/browse_df, which use the
+            # same AQ-GNoME field name. This package has no aq_gnome
+            # dependency, so the value is looked up by the caller and passed
+            # into add_candidate; self-healed (column created, NA-filled) on
+            # update_log() for checkpoints that predate this column.
             "Reduced Formula": pd.Series(dtype=pd.StringDtype()),
+            # AQ-GNoME's maximum (worst-case) Pourbaix decomposition energy
+            # for this candidate, stored under AQ-GNoME's own field name
+            # (matches OER_data_analasis_v2). Like Reduced Formula, looked up
+            # by the caller (computing it requires the AQ-GNoME H5PY
+            # decomposition-energy data, unavailable to this package) and
+            # passed into add_candidate; self-healed on update_log().
+            "max_dG_U[1.2,2.0]_pH0": pd.Series(dtype=pd.Float64Dtype()),
             "reason_or_hypothesis": pd.Series(dtype=pd.StringDtype()),
             "notes": pd.Series(dtype=pd.StringDtype()),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
@@ -174,16 +180,18 @@ class Explog:
                       study_obj: OER_catalyst_study,
                       reason_or_hypothesis: str | None = None,
                       notes: str | None = None,
-                      reduced_formula: str | None = None) -> None:
+                      reduced_formula: str | None = None,
+                      decomposition_energy: float | None = None) -> None:
 
-        # Self-heal the Reduced Formula column before writing:
-        # new_candidate_row always includes that key, so on a resumed
-        # pre-feature checkpoint (column missing entirely) this would
-        # otherwise raise "unknown columns" if add_candidate is the first
-        # EXPLOG call after resume -- i.e. before any update_log()-triggering
-        # tool call has had a chance to self-heal it first. Safe/idempotent
-        # to call unconditionally.
+        # Self-heal the Reduced Formula / decomposition-energy columns
+        # before writing: new_candidate_row always includes both keys, so on
+        # a resumed pre-feature checkpoint (columns missing entirely) this
+        # would otherwise raise "unknown columns" if add_candidate is the
+        # first EXPLOG call after resume -- i.e. before any
+        # update_log()-triggering tool call has had a chance to self-heal
+        # them first. Safe/idempotent to call unconditionally.
         self.job_handler._ensure_reduced_formula_column()
+        self.job_handler._ensure_decomposition_energy_column()
 
         if candidate_id in \
             self.relational_frame.candidates.df['candidate_id'].values:
@@ -192,6 +200,7 @@ class Explog:
 
         new_candidate_row = {"candidate_id": candidate_id,
                              "Reduced Formula": reduced_formula,
+                             "max_dG_U[1.2,2.0]_pH0": decomposition_energy,
                              "reason_or_hypothesis": reason_or_hypothesis,
                              "notes": notes,
                              "study_obj": study_obj,

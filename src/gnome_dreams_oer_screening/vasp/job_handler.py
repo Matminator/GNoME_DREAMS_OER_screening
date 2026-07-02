@@ -884,18 +884,37 @@ class Job_handler():
     def _ensure_reduced_formula_column(self) -> None:
         """Self-heal the "Reduced Formula" column (named to match AQ-GNoME's
         own field name exactly, for consistency with OER_data_analasis_v2/
-        get_candidate_data/browse_df): create it (NA-filled) if a resumed
-        checkpoint predates this feature. This package has no aq_gnome
-        dependency, so it can only guarantee the column EXISTS -- actual
-        values are (re)populated by the caller (src/tools.py, which has
-        AQ-GNoME access) via its own sync step. Never overwrites existing
-        values. Called as a step of update_log(), alongside
-        _recompute_candidate_progress and _recompute_disposition_state.
+        browse_df): create it (NA-filled) if a resumed checkpoint predates
+        this feature. This package has no aq_gnome dependency, so it can
+        only guarantee the column EXISTS -- actual values are (re)populated
+        by the caller (src/tools.py, which has AQ-GNoME access) via its own
+        sync step. Never overwrites existing values. Called as a step of
+        update_log(), alongside _recompute_candidate_progress and
+        _recompute_disposition_state.
         """
         cdf = self.rframe.candidates.df
         if "Reduced Formula" not in cdf.columns:
             cdf["Reduced Formula"] = pd.Series(
                 [pd.NA] * len(cdf), index=cdf.index, dtype="string"
+            )
+
+    def _ensure_decomposition_energy_column(self) -> None:
+        """Self-heal the "max_dG_U[1.2,2.0]_pH0" (Pourbaix decomposition
+        energy) column, named to match AQ-GNoME's own field name exactly:
+        create it (NA-filled) if a resumed checkpoint predates this feature.
+        This package has no aq_gnome dependency, so it can only guarantee the
+        column EXISTS -- actual values are (re)populated by the caller
+        (src/tools.py, which has AQ-GNoME access) via its own sync step,
+        which fills ONLY missing values (computing this one is an H5PY read
+        per candidate, unlike Reduced Formula's cheap lookup, so it is never
+        unconditionally overwritten). Never overwrites existing values here
+        either. Called as a step of update_log(), alongside
+        _recompute_candidate_progress and _recompute_disposition_state.
+        """
+        cdf = self.rframe.candidates.df
+        if "max_dG_U[1.2,2.0]_pH0" not in cdf.columns:
+            cdf["max_dG_U[1.2,2.0]_pH0"] = pd.Series(
+                [pd.NA] * len(cdf), index=cdf.index, dtype="Float64"
             )
 
     def _recompute_disposition_state(self) -> None:
@@ -1593,8 +1612,10 @@ class Job_handler():
         # Refresh the disposition coverage projection (needs_disposition_update)
         # from the now-settled process statuses + the dispositions on record.
         self._recompute_disposition_state()
-        # Self-heal reduced_formula (schema only -- see method docstring).
+        # Self-heal reduced_formula / decomposition energy (schema only --
+        # see method docstrings).
         self._ensure_reduced_formula_column()
+        self._ensure_decomposition_energy_column()
         return updates
 
     # ------------------------------------------------------------------

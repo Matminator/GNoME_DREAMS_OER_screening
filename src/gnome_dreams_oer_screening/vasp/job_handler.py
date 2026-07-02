@@ -881,6 +881,21 @@ class Job_handler():
             "has_finalized": len(units) > 0,
         }
 
+    def _ensure_reduced_formula_column(self) -> None:
+        """Self-heal the reduced_formula column: create it (NA-filled) if a
+        resumed checkpoint predates this feature. This package has no
+        aq_gnome dependency, so it can only guarantee the column EXISTS --
+        actual values are (re)populated by the caller (src/tools.py, which
+        has AQ-GNoME access) via its own sync step. Never overwrites existing
+        values. Called as a step of update_log(), alongside
+        _recompute_candidate_progress and _recompute_disposition_state.
+        """
+        cdf = self.rframe.candidates.df
+        if "reduced_formula" not in cdf.columns:
+            cdf["reduced_formula"] = pd.Series(
+                [pd.NA] * len(cdf), index=cdf.index, dtype="string"
+            )
+
     def _recompute_disposition_state(self) -> None:
         """Refresh needs_disposition_update on the candidates table.
 
@@ -1576,6 +1591,8 @@ class Job_handler():
         # Refresh the disposition coverage projection (needs_disposition_update)
         # from the now-settled process statuses + the dispositions on record.
         self._recompute_disposition_state()
+        # Self-heal reduced_formula (schema only -- see method docstring).
+        self._ensure_reduced_formula_column()
         return updates
 
     # ------------------------------------------------------------------

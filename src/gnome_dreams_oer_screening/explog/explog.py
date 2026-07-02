@@ -46,6 +46,12 @@ class Explog:
 
         study_df = pd.DataFrame({
             "candidate_id": pd.Series(dtype=pd.StringDtype()),
+            # AQ-GNoME "Reduced Formula" for this candidate (candidate_id ==
+            # AQ-GNoME MaterialId). This package has no aq_gnome dependency,
+            # so the value is looked up by the caller and passed into
+            # add_candidate; self-healed (column created, NA-filled) on
+            # update_log() for checkpoints that predate this column.
+            "reduced_formula": pd.Series(dtype=pd.StringDtype()),
             "reason_or_hypothesis": pd.Series(dtype=pd.StringDtype()),
             "notes": pd.Series(dtype=pd.StringDtype()),
             "study_obj": pd.Series(dtype="object"), # can store any Python object
@@ -164,7 +170,8 @@ class Explog:
                       candidate_id: str,
                       study_obj: OER_catalyst_study,
                       reason_or_hypothesis: str | None = None,
-                      notes: str | None = None) -> None:
+                      notes: str | None = None,
+                      reduced_formula: str | None = None) -> None:
 
         if candidate_id in \
             self.relational_frame.candidates.df['candidate_id'].values:
@@ -172,6 +179,7 @@ class Explog:
                               "already exists in the log.")
 
         new_candidate_row = {"candidate_id": candidate_id,
+                             "reduced_formula": reduced_formula,
                              "reason_or_hypothesis": reason_or_hypothesis,
                              "notes": notes,
                              "study_obj": study_obj,

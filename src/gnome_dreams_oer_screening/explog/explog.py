@@ -173,6 +173,14 @@ class Explog:
                       notes: str | None = None,
                       reduced_formula: str | None = None) -> None:
 
+        # Self-heal reduced_formula before writing: new_candidate_row always
+        # includes that key, so on a resumed pre-feature checkpoint (column
+        # missing entirely) this would otherwise raise "unknown columns" if
+        # add_candidate is the first EXPLOG call after resume -- i.e. before
+        # any update_log()-triggering tool call has had a chance to self-heal
+        # it first. Safe/idempotent to call unconditionally.
+        self.job_handler._ensure_reduced_formula_column()
+
         if candidate_id in \
             self.relational_frame.candidates.df['candidate_id'].values:
             raise ValueError(f"Candidate with id {candidate_id} " \

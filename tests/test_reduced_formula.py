@@ -15,6 +15,10 @@
 #     disposition columns already self-heal in _recompute_disposition_state.
 #     Self-healing only creates the column; it never fills in real values
 #     (that requires the AQ-GNoME database, which this package cannot see).
+#   Explog.add_candidate ALSO self-heals the column itself (independent of
+#     update_log()), so a resumed pre-feature checkpoint never raises
+#     "unknown columns" if add_candidate happens to be the first EXPLOG call
+#     after resume (i.e. before any update_log()-triggering tool has run).
 
 import pandas as pd
 import pytest
@@ -83,3 +87,24 @@ def test_empty_frame_no_raise(tmp_path):
     explog.update_log()
     assert len(explog.relational_frame.candidates.df) == 0
     assert "reduced_formula" in explog.relational_frame.candidates.df.columns
+
+
+def test_add_candidate_self_heals_without_update_log_first(tmp_path):
+    # Simulate a resumed pre-feature checkpoint whose candidates.df predates
+    # the column entirely, where add_candidate is the FIRST EXPLOG call after
+    # resume -- no update_log() has run yet, so its self-heal hasn't fired.
+    # add_candidate must not raise "unknown columns ['reduced_formula']".
+    explog = _explog(tmp_path)
+    explog.add_candidate(candidate_id="old", study_obj=object(),
+                         reason_or_hypothesis="r", reduced_formula="TiO2")
+    cdf = explog.relational_frame.candidates.df
+    explog.relational_frame.candidates.df = cdf.drop(columns=["reduced_formula"])
+
+    explog.add_candidate(candidate_id="new", study_obj=object(),
+                         reason_or_hypothesis="r", reduced_formula="RuO2")
+
+    assert "reduced_formula" in explog.relational_frame.candidates.df.columns
+    assert _val(explog, "new", "reduced_formula") == "RuO2"
+    # The self-heal (schema only) also reaches the pre-existing row, but it
+    # cannot recover a value this package never had -- stays <NA>.
+    assert pd.isna(_val(explog, "old", "reduced_formula"))

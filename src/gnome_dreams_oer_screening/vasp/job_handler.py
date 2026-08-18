@@ -1378,7 +1378,6 @@ class Job_handler():
                         atoms.calc = SinglePointCalculator(
                             atoms, energy=energy, magmoms=magmom
                         )
-                        clean_up_vasp_directory(vasp_dir)
 
                     except Exception:
                         self.rframe.processes.df.at[idx, 'status'] \
@@ -1412,6 +1411,14 @@ class Job_handler():
                                 # terminal.
                         continue
 
+                    finally:
+                        # `finally`, not a trailing call: the except ends in
+                        # `continue`, and failed jobs are the ones to clean.
+                        try:
+                            clean_up_vasp_directory(vasp_dir)
+                        except Exception:
+                            pass
+
                 else:
                     try:
                         atoms = read_vasp_results(vasp_dir)[-1]
@@ -1425,7 +1432,6 @@ class Job_handler():
                             raise ValueError(
                                 "NaN magnetic moments from VASP result."
                             )
-                        clean_up_vasp_directory(vasp_dir)
                     except Exception:
                         import traceback
                         print(
@@ -1478,6 +1484,14 @@ class Job_handler():
                                 # )
                                 pass
                         continue
+
+                    finally:
+                        # As above: the except ends in `continue`, so a trailing
+                        # call would never run for failed jobs.
+                        try:
+                            clean_up_vasp_directory(vasp_dir)
+                        except Exception:
+                            pass
 
                 cand_row = self.rframe.candidates[candt_id]
                 study = cand_row.df['study_obj'].values[0]

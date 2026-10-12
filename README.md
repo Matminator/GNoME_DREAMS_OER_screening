@@ -1,13 +1,48 @@
 # GNoME_DREAMS_OER_screening
 
-## v1.1.2 Updates
+The DFT engine behind an autonomous OER catalyst screening campaign: it turns a
+bulk crystal structure into relaxed adsorbate geometries and the free energies
+that rank it as a catalyst, and records every calculation and decision in a
+relational log.
 
-**Production-mode tag restoration**: ASE atom tags (tag=3 for adsorption site, tag=4 for adsorbed O/H) are not preserved through VASP POSCAR/vasprun.xml round-trips. `job_handler.py` now explicitly restores tags from the in-memory study object before passing VASP-returned atoms to `set_relaxed_O_calc` / `set_relaxed_OH_calc`.
+**[Browse the results](https://matminator.github.io/OER-GNoME/)** ·
+**Data:** [doi.org/10.11583/DTU.33265158](https://doi.org/10.11583/DTU.33265158)
 
-**Pickle checkpointing refactor**: `hpc_workflow_tryout.py` and the companion notebook no longer attempt to pickle the full `EXPLOG` object (which contains unpicklable `pysqa.QueueAdapter` functions). Mid-run and end-of-run checks now load and verify the `explog.pkl` payload dict written internally by `Explog._save_pickle()`.
+## What it does
 
-## v1.0.0 Updates
+```
+oer/       surface and termination generation, adsorption-site determination,
+           coordination-based surface ranking, free energies and overpotentials
+vasp/      VASP input sets (RPBE), magnetic-configuration enumeration,
+           job submission and validation, convergence recovery via custodian
+explog/    the relational record: one row per candidate with its hypothesis and
+           decision history, one per calculation with its site and energies
+niflheim/  SLURM submission, partition routing by system size
+```
 
-IMPORTANT:
-Now needs enumlib, used under pymatgen. This CAN NOT run on Windows. 
-- see https://pymatgen.org/installation.html for installation of enumlib and configuring of pymatgen
+The pipeline is a fixed ladder — bulk relaxation, surface relaxation, O\*, then
+OH\* — with ordering enforced in validation, so an adsorbate calculation cannot
+start from an unaccepted surface.
+
+## Install
+
+```bash
+pip install .
+```
+
+Magnetic enumeration additionally needs the `enumlib` Fortran binaries
+(`enum.x`, `makestr.x`) on PATH; `conda install -c conda-forge enumlib` on
+Linux. Without them, enumeration falls back to a single non-magnetic job.
+Running the DFT itself requires a licensed VASP installation.
+
+## Notes
+
+Termination indices are positional and follow pymatgen's miller-index
+enumeration order, which is not a stable API across pymatgen releases. Indices
+recorded in a log are only meaningful alongside the pymatgen version that
+produced them.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). The accompanying dataset is separately licensed
+CC BY-NC 4.0.

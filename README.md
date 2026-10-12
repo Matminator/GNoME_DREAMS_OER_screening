@@ -1,6 +1,6 @@
 # GNoME_DREAMS_OER_screening
 
-The DFT engine behind an autonomous OER catalyst screening campaign: it turns a
+The DFT engine behind an [autonomous OER catalyst screening campaign](https://github.com/BattModels/material_agent/tree/oer_resume_extented_workflow): it turns a
 bulk crystal structure into relaxed adsorbate geometries and the free energies
 that rank it as a catalyst, and records every calculation and decision in a
 relational log.

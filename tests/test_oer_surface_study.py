@@ -769,8 +769,9 @@ def test_magmom_propagates_gnome_IrO4Pd_manually_assigned():
 
     study.predict_most_likely_surfaces(method='O-coordination')
 
-    study.initialize_oer_surface_study(0)
-    surface_study = study.get_surface_studies()[0]
+    term = sorted(study.terminations)[0]
+    study.initialize_oer_surface_study(term)
+    surface_study = study.get_surface_studies()[term]
     _assert_slab_magmoms_match_bulk(surface_study, study.get_bulk_structure())
 
 

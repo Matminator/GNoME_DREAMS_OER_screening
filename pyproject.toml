@@ -1,16 +1,18 @@
 [build-system]
-requires = ["setuptools>=70.0.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "GNoME_DREAMS_OER_screening"
 version = "1.5.1"
-description = "TEMP"
+description = "Autonomous OER catalyst screening: surface generation, adsorption-site determination, VASP orchestration, and a relational exploration log."
 authors = [
-    {name = "Mathias"},
-    {name = "Ziqi"},
+    {name = "Mathias Nissen"},
+    {name = "Ziqi Wang"},
 ]
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 dependencies = [
     "pymatgen", "spglib", "ase", "pandas", "numpy", "seaborn", "custodian",

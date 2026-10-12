@@ -7,6 +7,7 @@ from sympy import rf
 import pickle
 
 from .relational_frame import RelationalFrame
+from gnome_dreams_oer_screening.niflheim.slurm import PartitionName
 from gnome_dreams_oer_screening.oer.oer_study import OER_catalyst_study
 from gnome_dreams_oer_screening.vasp.job_handler import Job_handler
 from gnome_dreams_oer_screening.vasp.job_validation import (
@@ -286,7 +287,7 @@ class Explog:
         return result
 
     def submit_process(self, process_id: int | str,
-        partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto']
+        partition: PartitionName
         = 'auto') -> None:
 
         if isinstance(process_id, str):

@@ -21,6 +21,10 @@ from gnome_dreams_oer_screening.vasp.job_validation import (
 from gnome_dreams_oer_screening.explog.relational_frame import (
     RelationalFrame)
 from gnome_dreams_oer_screening import get_my_jobs_status
+from gnome_dreams_oer_screening.niflheim.slurm import (
+    PartitionName, TEST_PARTITION, CORES_PER_PARTITION,
+    partition_for_atom_count, choose_partition,
+)
     
 
 class Job_handler():
@@ -266,7 +270,7 @@ class Job_handler():
     def submit_vasp_calculation(
         self,
         process_id: int,
-        partition: Literal['xeon56', 'xeon40el8', 'xeon24el8', 'auto'],
+        partition: PartitionName,
         # vasp_cmd: list = ["mpiexec", "vasp_std"],
         # max_errors: int = 20
         ) -> None:
@@ -479,7 +483,7 @@ class Job_handler():
                     raise FileNotFoundError(
                         f"Sleep-job script not found: {sleep_script}"
                     )
-                partition = 'xeon24el8_test'
+                partition = TEST_PARTITION
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"
                 submit_command = (
@@ -492,7 +496,7 @@ class Job_handler():
                     raise FileNotFoundError(
                         f"MLIP-job script not found: {mlip_script}"
                     )
-                partition = 'xeon24el8_test'
+                partition = TEST_PARTITION
                 cores, nodes = 1, 1
                 walltime = f"00:10:00"
                 submit_command = (
@@ -521,21 +525,16 @@ class Job_handler():
                     )
 
                 if partition == 'auto':
-                    # NOTE, could make a smart auto-partition
-                    if len(init_structure) < 85:
-                        partition = 'xeon40el8'
-                    else:
-                        partition = 'xeon56'
+                    # atom count sets the floor; promote to a more capable
+                    # partition only if one has an idle node right now.
+                    partition = choose_partition(
+                        partition_for_atom_count(len(init_structure))
+                    )
 
-                if partition == 'xeon56':
-                    cores, nodes = 56, 1
-                elif partition == 'xeon40el8':
-                    cores, nodes = 40, 1
-                elif partition == 'xeon24el8':
-                    cores, nodes = 24, 1
-                else:
+                if partition not in CORES_PER_PARTITION:
                     raise ValueError(f"Partition {partition} not " \
                                      f"recognized.")
+                cores, nodes = CORES_PER_PARTITION[partition], 1
 
                 walltime = "50:00:00"
 

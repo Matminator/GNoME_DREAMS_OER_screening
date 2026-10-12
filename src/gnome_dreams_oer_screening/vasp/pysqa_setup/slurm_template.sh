@@ -10,11 +10,14 @@
 
 module purge
 module use /home/modules/energy/modules/all
-module load VASP/6.5.1-intel-2023a
+module load VASP/6.5.1-intel-2025b
+module load impi/2021.16.1-intel-compilers-2025.2.0
 
-module load impi/2021.9.0-intel-compilers-2023.1.0
+# No Python module: venv_el9 ships its own CPython 3.11.13. Loading one would
+# shadow it.
+source venv_el9/bin/activate || exit 1
 
-ml Python/3.11.3-GCCcore-12.3.0
-source venv2/bin/activate
+command -v vasp_std >/dev/null && command -v mpiexec >/dev/null || {
+    echo "FATAL: VASP/impi not on PATH on $(hostname)" >&2; exit 1; }
 
 {{command}}

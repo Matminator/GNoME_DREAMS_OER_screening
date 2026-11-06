@@ -55,3 +55,9 @@ markers = [
     "mini: marks fast tests for quick runs",
     "enumlib: marks tests that require enumlib binaries on PATH (Linux/HPC only)",
 ]
+
+[tool.setuptools.package-data]
+# job_handler.py resolves pysqa_setup/ relative to its own location, so these
+# must ship inside the vasp package. packages.find collects only .py files, so
+# without this a pip-installed copy has no queue config and cannot submit a job.
+"gnome_dreams_oer_screening.vasp" = ["pysqa_setup/*"]
